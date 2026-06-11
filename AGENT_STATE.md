@@ -173,3 +173,21 @@ short clarification before editing.
   wiring/solder joint; not an Arduino channel/code issue.
 - 2026-05-22: User explicitly requested pushing this repo to GitHub. Local repo
   has no commits yet and no remote configured at the time of request.
+- 2026-06-08: On Lubancat 4, manually starting NoMachine reliably causes
+  onboard PCIe Realtek `rtl8852be` Wi-Fi to disconnect and scan zero APs within
+  about 20-30 seconds. Kernel log repeats
+  `halbb_*_rf_reg_8852b_a is_w_busy/is_r_busy`. This is a wireless driver/chip
+  hang, not a Wi-Fi password or rfkill issue. Manual recovery command:
+  `sudo systemctl restart rtl8852be-reload.service`. Added
+  `scripts/recover_lubancat_wifi.sh` and installed/enabled
+  `lubancat-wifi-watchdog.timer`, which checks every 30s and reloads the
+  driver only when `wlan0` is not connected and Wi-Fi scan returns zero APs.
+  NoMachine service is installed but `nxserver.service` autostart is disabled.
+- 2026-06-08: Tried a root-cause mitigation by setting
+  `options 8852be rtw_lps_mode=0 rtw_low_power=0 rtw_msi_en=0`. This made the
+  Realtek PCIe device worse on this Lubancat 4: kernel reported
+  `Unable to change power state from D3cold to D0, device inaccessible`, and
+  `wlan0` disappeared from `nmcli`. Reverted `/etc/modprobe.d/8852be-stability.conf`
+  to only `rtw_lps_mode=0 rtw_low_power=0`. Do not retry `rtw_msi_en=0` on this
+  board without a full reboot/cold-boot plan. Current session may need reboot
+  to re-enumerate the PCIe Wi-Fi device.
