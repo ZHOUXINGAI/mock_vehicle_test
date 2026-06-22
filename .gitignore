@@ -5,3 +5,6 @@ log/
 build/
 install/
 .pytest_cache/
+tools/QGroundControl-aarch64.AppImage
+tools/qgroundcontrol-v4.4.5/
+tools/qtlocation-5.15.3/

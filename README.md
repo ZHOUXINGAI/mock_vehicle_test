@@ -66,6 +66,12 @@ setpoints. Validate it in SITL or with wheels lifted before using hardware.
 
 For Pixhawk 6C hardware, start with manual rover control first:
 
+[docs/current_rover_success_baseline_2026_06_16.md](docs/current_rover_success_baseline_2026_06_16.md)
+
+[docs/offboard_minimal_task_design_2026_06_16.md](docs/offboard_minimal_task_design_2026_06_16.md)
+
+[docs/mavros_px4_usb_to_qgc_plan_2026_06_16.md](docs/mavros_px4_usb_to_qgc_plan_2026_06_16.md)
+
 [docs/beginner_rc_rover_step_by_step.md](docs/beginner_rc_rover_step_by_step.md)
 
 [docs/pixhawk6c_manual_rover.md](docs/pixhawk6c_manual_rover.md)

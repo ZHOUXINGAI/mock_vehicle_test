@@ -1,0 +1,15 @@
+/**:
+  ros__parameters:
+    plugin_denylist:
+      # Common plugins not needed for this rover setup.
+      - image_pub
+      - vibration
+      - distance_sensor
+      - rangefinder
+      - wheel_odometry
+
+      # The MAVROS 2.14 param plugin aborts under repeated/high-RTT parameter
+      # service calls on this PX4 link. Keep MAVROS for telemetry, QGC routing,
+      # and Offboard setpoints; use PX4 shell or a separate MAVLink tool for
+      # PX4 parameter changes.
+      - param

@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+MANUAL_CONTROL_LOG_DISABLE="${MANUAL_CONTROL_LOG_DISABLE:-false}"
+if [ "$MANUAL_CONTROL_LOG_DISABLE" != "true" ] \
+  && [ "${MANUAL_CONTROL_LOG_ACTIVE:-false}" != "true" ]; then
+  MANUAL_CONTROL_LOG_ROOT="${MANUAL_CONTROL_LOG_ROOT:-$REPO_DIR/results/manual_control}"
+  MANUAL_CONTROL_RUN_ID="${MANUAL_CONTROL_RUN_ID:-$(date +%Y%m%d_%H%M%S)}"
+  MANUAL_CONTROL_LOG_DIR="$MANUAL_CONTROL_LOG_ROOT/$MANUAL_CONTROL_RUN_ID"
+  MANUAL_CONTROL_LOG_FILE="$MANUAL_CONTROL_LOG_DIR/manual_control.log"
+  mkdir -p "$MANUAL_CONTROL_LOG_DIR"
+  ln -sfn "$MANUAL_CONTROL_LOG_DIR" "$MANUAL_CONTROL_LOG_ROOT/latest"
+  export MANUAL_CONTROL_LOG_ACTIVE=true
+  export MANUAL_CONTROL_LOG_DIR
+  export MANUAL_CONTROL_LOG_FILE
+
+  echo "Saving indoor manual-control task log:"
+  echo "  directory: $MANUAL_CONTROL_LOG_DIR"
+  echo "  file:      $MANUAL_CONTROL_LOG_FILE"
+  echo "  latest:    $MANUAL_CONTROL_LOG_ROOT/latest"
+  echo
+
+  exec > >(tee -a "$MANUAL_CONTROL_LOG_FILE") 2>&1
+  echo "===== INDOOR MANUAL CONTROL TASK LOG START $(date --iso-8601=seconds) ====="
+  echo "cwd=$PWD"
+  echo "command=$0 $*"
+  echo
+fi
+
+cat <<'EOF'
+Indoor MAVROS MANUAL_CONTROL no-GPS task.
+
+Default behavior:
+  - does not request OFFBOARD
+  - does not request ARM
+  - expects MAVROS already connected to Pixhawk
+  - expects RC transmitter ready for disarm/kill takeover
+  - expects the vehicle to be in MANUAL and manually armed before motion starts
+  - sends MANUAL_CONTROL: forward 1s, stop, backward 1s, stop, left/right turns
+  - aborts if mode leaves MANUAL or the vehicle disarms
+EOF
+
+TEST_SURFACE="${TEST_SURFACE:-wheels_lifted}"
+ALLOWED_MODES="${ALLOWED_MODES:-MANUAL}"
+REQUIRE_CONNECTED="true"
+REQUIRE_ARMED="true"
+ABORT_ON_MODE_EXIT="true"
+ABORT_ON_DISARM="true"
+MAX_WAIT_FOR_READY_SEC="${MAX_WAIT_FOR_READY_SEC:-60}"
+COMMAND_RATE_HZ="${COMMAND_RATE_HZ:-20}"
+WARMUP_SEC="${WARMUP_SEC:-2.0}"
+STOP_SEC="${STOP_SEC:-1.0}"
+FORWARD_SEC="${FORWARD_SEC:-1.0}"
+BACKWARD_SEC="${BACKWARD_SEC:-1.0}"
+TURN_SEC="${TURN_SEC:-0.5}"
+FINAL_STOP_SEC="${FINAL_STOP_SEC:-2.0}"
+FORWARD_AXIS="${FORWARD_AXIS:-z}"
+TURN_AXIS="${TURN_AXIS:-r}"
+FORWARD_VALUE_RAW="${FORWARD_VALUE_RAW:-120}"
+TURN_VALUE_RAW="${TURN_VALUE_RAW:-120}"
+FORWARD_SIGN="${FORWARD_SIGN:-1.0}"
+TURN_SIGN="${TURN_SIGN:-1.0}"
+NEUTRAL_Z_RAW="${NEUTRAL_Z_RAW:-0}"
+MAX_ABS_XY_R_RAW="${MAX_ABS_XY_R_RAW:-250}"
+MIN_Z_RAW="${MIN_Z_RAW:--250}"
+MAX_Z_RAW="${MAX_Z_RAW:-1000}"
+
+cat <<EOF
+Effective indoor manual-control settings:
+  TEST_SURFACE=$TEST_SURFACE
+  ALLOWED_MODES=$ALLOWED_MODES
+  REQUIRE_ARMED=$REQUIRE_ARMED
+  FORWARD_AXIS=$FORWARD_AXIS
+  TURN_AXIS=$TURN_AXIS
+  FORWARD_VALUE_RAW=$FORWARD_VALUE_RAW
+  TURN_VALUE_RAW=$TURN_VALUE_RAW
+  MAX_WAIT_FOR_READY_SEC=$MAX_WAIT_FOR_READY_SEC
+EOF
+
+exec env \
+  TEST_SURFACE="$TEST_SURFACE" \
+  ALLOWED_MODES="$ALLOWED_MODES" \
+  REQUIRE_CONNECTED="$REQUIRE_CONNECTED" \
+  REQUIRE_ARMED="$REQUIRE_ARMED" \
+  ABORT_ON_MODE_EXIT="$ABORT_ON_MODE_EXIT" \
+  ABORT_ON_DISARM="$ABORT_ON_DISARM" \
+  MAX_WAIT_FOR_READY_SEC="$MAX_WAIT_FOR_READY_SEC" \
+  COMMAND_RATE_HZ="$COMMAND_RATE_HZ" \
+  WARMUP_SEC="$WARMUP_SEC" \
+  STOP_SEC="$STOP_SEC" \
+  FORWARD_SEC="$FORWARD_SEC" \
+  BACKWARD_SEC="$BACKWARD_SEC" \
+  TURN_SEC="$TURN_SEC" \
+  FINAL_STOP_SEC="$FINAL_STOP_SEC" \
+  FORWARD_AXIS="$FORWARD_AXIS" \
+  TURN_AXIS="$TURN_AXIS" \
+  FORWARD_VALUE_RAW="$FORWARD_VALUE_RAW" \
+  TURN_VALUE_RAW="$TURN_VALUE_RAW" \
+  FORWARD_SIGN="$FORWARD_SIGN" \
+  TURN_SIGN="$TURN_SIGN" \
+  NEUTRAL_Z_RAW="$NEUTRAL_Z_RAW" \
+  MAX_ABS_XY_R_RAW="$MAX_ABS_XY_R_RAW" \
+  MIN_Z_RAW="$MIN_Z_RAW" \
+  MAX_Z_RAW="$MAX_Z_RAW" \
+  "$REPO_DIR/scripts/run_real_rover_mavros_manual_control_smoke.sh"

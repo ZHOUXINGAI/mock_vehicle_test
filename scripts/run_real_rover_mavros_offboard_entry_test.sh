@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+exec env \
+  MODE_CHANGE_ON_START="${MODE_CHANGE_ON_START:-true}" \
+  ARM_ON_START="${ARM_ON_START:-true}" \
+  DISARM_ON_FINISH="${DISARM_ON_FINISH:-true}" \
+  LINEAR_SPEED_MPS="${LINEAR_SPEED_MPS:-0}" \
+  TURN_YAW_RATE_RADPS="${TURN_YAW_RATE_RADPS:-0}" \
+  FORWARD_SEC="${FORWARD_SEC:-0}" \
+  BACKWARD_SEC="${BACKWARD_SEC:-0}" \
+  TURN_SEC="${TURN_SEC:-0}" \
+  FINAL_STOP_SEC="${FINAL_STOP_SEC:-1.0}" \
+  CONFIRM_QGC_DISARM_READY="${CONFIRM_QGC_DISARM_READY:-false}" \
+  CONFIRM_PHYSICAL_POWER_CUTOFF_READY="${CONFIRM_PHYSICAL_POWER_CUTOFF_READY:-false}" \
+  AUTO_RESTORE_OUTPUT_MAPPING="${AUTO_RESTORE_OUTPUT_MAPPING:-true}" \
+  "$REPO_DIR/scripts/run_real_rover_mavros_offboard_smoke.sh"
