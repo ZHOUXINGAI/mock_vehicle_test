@@ -1,9 +1,9 @@
 {
   "agent": "docking",
   "needs": [
-    "Orin2 start immediately and return Mini summary"
+    "Orin2 30-second target 0.0 summary and PX4 MAVLink forwarding status"
   ],
-  "notes": "Carrier window 23:19:18-23:24:18 CST; zero-speed HOLD only; run 20260722_231918_carrier_sync.",
+  "notes": "Carrier broadcast window 23:28:24-23:33:24; no motion executor.",
   "repo": "/home/jetson/mock_vehicle_test",
   "repo_git": {
     "branch": "master",
@@ -16,15 +16,15 @@
       " M docs/current_rover_success_baseline_2026_06_16.md",
       " M scripts/configure_qgc_udp_only.sh",
       "?? arduino/d24a_forced_standby/",
-      "?? codex_ops/inbox/rover/20260722_231936_docking_ack_carrier-pair-b-hold-running-23-19-18-23-24-18-cst.md",
+      "?? codex_ops/inbox/rover/20260722_232852_docking_request_run-mini-30s-pair-b-broadcast-route-diagnostic-now.md",
       "?? scripts/run_mavros_mini_lr24_to_qgc_logged.sh",
       "?? scripts/upload_d24a_bridge_safety_firmware.sh"
     ],
-    "head": "a207493",
+    "head": "78d296d",
     "remote": "git@github.com:ZHOUXINGAI/mock_vehicle_test.git",
     "repo": "/home/jetson/mock_vehicle_test"
   },
   "status": "working",
-  "task": "Carrier Pair B HOLD endpoint running; waiting for synchronized Orin2 Mini 120-second endpoint",
-  "updated_at": "2026-07-22T23:19:36+08:00"
+  "task": "Pair B broadcast-route diagnostic running; targeted synchronized test received zero frames",
+  "updated_at": "2026-07-22T23:28:52+08:00"
 }
