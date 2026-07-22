@@ -1,0 +1,10 @@
+{
+  "agent": "docking",
+  "updated_at": "2026-07-22T00:00:00+08:00",
+  "status": "initialized",
+  "task": "codex_ops bootstrap",
+  "repo": "/home/jetson/easydocking",
+  "repo_git": {},
+  "needs": [],
+  "notes": "Docking Codex owns easydocking planner and simulation."
+}
