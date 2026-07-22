@@ -1,9 +1,9 @@
 {
   "agent": "docking",
   "needs": [
-    "Orin2 30-second target 0.0 summary and PX4 MAVLink forwarding status"
+    "Orin2 immediate 30-second Mini summary"
   ],
-  "notes": "Carrier broadcast window 23:28:24-23:33:24; no motion executor.",
+  "notes": "Root baud bug fixed in c77d936; window 23:34:33-23:37:33 CST.",
   "repo": "/home/jetson/mock_vehicle_test",
   "repo_git": {
     "branch": "master",
@@ -16,15 +16,15 @@
       " M docs/current_rover_success_baseline_2026_06_16.md",
       " M scripts/configure_qgc_udp_only.sh",
       "?? arduino/d24a_forced_standby/",
-      "?? codex_ops/inbox/rover/20260722_232852_docking_request_run-mini-30s-pair-b-broadcast-route-diagnostic-now.md",
+      "?? codex_ops/inbox/rover/20260722_233455_docking_handoff_pull-c77d936-carrier-real-57600-broadcast-test-running.md",
       "?? scripts/run_mavros_mini_lr24_to_qgc_logged.sh",
       "?? scripts/upload_d24a_bridge_safety_firmware.sh"
     ],
-    "head": "78d296d",
+    "head": "c77d936",
     "remote": "git@github.com:ZHOUXINGAI/mock_vehicle_test.git",
     "repo": "/home/jetson/mock_vehicle_test"
   },
   "status": "working",
-  "task": "Pair B broadcast-route diagnostic running; targeted synchronized test received zero frames",
-  "updated_at": "2026-07-22T23:28:52+08:00"
+  "task": "Carrier 57600 Pair B broadcast verification running",
+  "updated_at": "2026-07-22T23:34:55+08:00"
 }
