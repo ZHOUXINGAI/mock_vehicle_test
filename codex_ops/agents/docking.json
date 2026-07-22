@@ -1,31 +1,30 @@
 {
   "agent": "docking",
   "needs": [
-    "Orin2 result note with post-reboot parameter values and packet/gate summaries"
+    "Orin2 start immediately and return Mini summary"
   ],
-  "notes": "Implementation commit 4e700de; no real PX4 parameter writes, radio packets, or motion were performed on Orin1.",
+  "notes": "Carrier window 23:19:18-23:24:18 CST; zero-speed HOLD only; run 20260722_231918_carrier_sync.",
   "repo": "/home/jetson/mock_vehicle_test",
   "repo_git": {
     "branch": "master",
-    "dirty_count": 11,
+    "dirty_count": 10,
     "dirty_sample": [
       "M AGENT_STATE.md",
       " M arduino/d24a_pixhawk_differential_pwm_bridge/d24a_pixhawk_differential_pwm_bridge.ino",
       " M arduino/d24a_pixhawk_pwm_bridge/d24a_pixhawk_pwm_bridge.ino",
       " M codex_ops/events/2026/2026-07-22.jsonl",
-      " M codex_ops/state/meeting_state.md",
       " M docs/current_rover_success_baseline_2026_06_16.md",
       " M scripts/configure_qgc_udp_only.sh",
       "?? arduino/d24a_forced_standby/",
-      "?? codex_ops/inbox/rover/20260722_225923_docking_handoff_pull-4e700de-and-bring-up-mini-pair-b-mavlink-tunnel-no-motion.md",
+      "?? codex_ops/inbox/rover/20260722_231936_docking_ack_carrier-pair-b-hold-running-23-19-18-23-24-18-cst.md",
       "?? scripts/run_mavros_mini_lr24_to_qgc_logged.sh",
       "?? scripts/upload_d24a_bridge_safety_firmware.sh"
     ],
-    "head": "4e700de",
+    "head": "a207493",
     "remote": "git@github.com:ZHOUXINGAI/mock_vehicle_test.git",
     "repo": "/home/jetson/mock_vehicle_test"
   },
-  "status": "waiting",
-  "task": "Orin2 Mini TELEM2 configuration and Pair B 120-second no-motion hardware validation",
-  "updated_at": "2026-07-22T22:59:23+08:00"
+  "status": "working",
+  "task": "Carrier Pair B HOLD endpoint running; waiting for synchronized Orin2 Mini 120-second endpoint",
+  "updated_at": "2026-07-22T23:19:36+08:00"
 }
