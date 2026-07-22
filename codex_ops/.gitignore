@@ -6,3 +6,7 @@ __pycache__/
 .DS_Store
 tmp/
 local/
+runs/*
+!runs/.gitkeep
+cloud/.env
+cloud/certs/

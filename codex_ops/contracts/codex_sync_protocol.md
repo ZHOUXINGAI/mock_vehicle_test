@@ -1,10 +1,25 @@
 # Codex Sync Protocol
 
-This contract defines how rover and docking Codex sessions coordinate through
-Git. The coordination workspace is `codex_ops/` inside the existing
-`mock_vehicle_test` repository, not a separate repo.
+This contract defines how Orin1/Carrier and Orin2/Mini Codex workers coordinate
+through NATS JetStream and Git. The coordination workspace is `codex_ops/`
+inside the existing `mock_vehicle_test` repository, not a separate repo.
 
-## Required Sync Points
+## Channel Responsibilities
+
+```text
+NATS JetStream: task wake-up, ACK/NAK, progress, heartbeat, compact result,
+                automatic peer request
+GitHub:         source code, contracts, decisions, review, durable audit
+OBS/artifacts:  large logs, plots, bags, images, binaries
+LR24/MAVLink:   robot runtime communication only
+```
+
+NATS uses at-least-once delivery. Each task has a UUID, root/parent IDs, a hop
+limit, and local SQLite idempotency. A worker ACKs only after terminal handling;
+failed work is NAKed for retry. Peer tasks inherit the root and cannot inherit
+or request hardware capability.
+
+## Required Git Sync Points
 
 Start of work:
 
@@ -83,3 +98,8 @@ If two files disagree:
 
 `codex_ops/` is not part of the vehicle control loop. It can be stale or
 offline without making the robots unsafe.
+
+The cloud worker is also outside the vehicle control loop. Its systemd service
+uses private device isolation, Codex approval mode `never`, an explicit
+read-only or workspace-write sandbox, repository allowlists, and a hard reject
+for motion, arming, Offboard, actuator, and hardware-write flags.

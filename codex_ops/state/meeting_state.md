@@ -1,6 +1,6 @@
 # Shared Meeting State
 
-Last updated: 2026-07-22 CST
+Last updated: 2026-07-23 CST
 
 This is the operational shared whiteboard for the rover/docking Codex pair.
 Project-specific docs in each repo still contain details, but this file is the
@@ -24,6 +24,15 @@ first place both agents read for current decisions.
   `easydocking` planner.
 - Orin1 / Carrier is the docking leader: it receives Mini state, runs the
   planner, and emits phase, primitive, corridor, or abort commands.
+- Boss approved a Huawei ECS coordination control plane for continuous Codex
+  collaboration. Persistent Orin1 and Orin2 workers communicate through mTLS
+  NATS JetStream and can dispatch structured peer tasks directly.
+- GitHub remains the canonical source-code/decision/audit channel. NATS is the
+  live wake-up/ACK/progress/result channel; OBS is optional for large artifacts.
+- The cloud coordination service is never part of LR24, MAVLink, PX4, Offboard,
+  arming, actuator, or docking runtime control.
+- All Codex cloud tasks are hardware-denied by local policy. Repository write
+  mode does not grant serial, MAVLink, GPIO, Arduino, motor, or sudo access.
 
 ## Active Repositories
 
@@ -159,5 +168,24 @@ If a change needs the peer Codex to know or act, it must produce:
 2. if action is needed, an inbox note under `inbox/<peer>/`;
 3. a commit that includes `codex_ops/`.
 
-The final user reply should include a short "give this to the other Codex"
-message only as a convenience. The durable source is `codex_ops/`.
+When both persistent workers are online, peer work must use a structured NATS
+`peer_requests` entry. Boss should not act as a manual relay. The final user
+reply may summarize peer activity, but the durable sources are the NATS task
+lineage and committed Git artifacts.
+
+If the cloud broker is unavailable, use the Git inbox/event flow above as the
+fallback and reconcile it after connectivity returns.
+
+## Cloud Coordination Validation
+
+Local no-hardware end-to-end validation passed on 2026-07-23:
+
+```text
+Boss -> Orin1 parent: c89a3c97-caed-4628-98b7-d4b9e81cd893
+Orin1 -> Orin2 child: 5003e99a-48c8-4c84-af77-00bf0e704a56
+```
+
+Orin1 generated the peer request, agentd dispatched it, and Orin2 completed it
+without Boss copying any message. No MAVROS, QGC, PX4, serial, Offboard,
+Arduino, or motor process was started. Production deployment awaits the Huawei
+ECS public endpoint and SSH access details.

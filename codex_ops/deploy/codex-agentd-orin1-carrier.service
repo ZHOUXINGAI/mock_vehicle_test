@@ -1,0 +1,25 @@
+[Unit]
+Description=Codex coordination worker (Orin1 Carrier)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jetson
+Group=jetson
+WorkingDirectory=/home/jetson/mock_vehicle_test
+ExecStart=/home/jetson/mock_vehicle_test/codex_ops/local/venv/bin/python -m codex_ops.realtime.agentd --config /etc/codex-agentd/orin1-carrier.json
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateDevices=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+LockPersonality=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,8 @@
+{
+  "nats": {
+    "servers": ["tls://REPLACE_WITH_HUAWEI_ECS_DNS_OR_IP:4222"],
+    "ca_file": "/etc/codex-agentd/certs/ca.crt",
+    "cert_file": "/etc/codex-agentd/certs/boss.crt",
+    "key_file": "/etc/codex-agentd/certs/boss.key"
+  }
+}

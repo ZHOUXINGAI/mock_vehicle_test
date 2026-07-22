@@ -1,0 +1,25 @@
+[Unit]
+Description=Codex coordination worker (Orin2 Mini)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=seeed
+Group=seeed
+WorkingDirectory=/home/seeed/mock_vehicle_test
+ExecStart=/home/seeed/mock_vehicle_test/codex_ops/local/venv/bin/python -m codex_ops.realtime.agentd --config /etc/codex-agentd/orin2-mini.json
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateDevices=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+LockPersonality=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

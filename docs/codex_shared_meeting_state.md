@@ -240,3 +240,32 @@ If the user makes a new boss-level architecture decision:
 2. Mirror the decision here if it affects rover hardware/test execution.
 3. Add a concise entry to rover-side `docs/codex_cross_agent_log.md`.
 4. Final replies should include `给对面 Codex 的话` with exact files to read.
+
+## 2026-07-23 Persistent Cross-Machine Codex Coordination
+
+Boss approved a Huawei ECS coordination control plane so Orin1 and Orin2 can
+work continuously without Boss copying chat messages.
+
+```text
+Huawei ECS:
+  mTLS NATS JetStream; persistent task/event/heartbeat streams
+
+Orin1 / Carrier:
+  persistent codex-agentd; Carrier/planner integration owner
+
+Orin2 / Mini:
+  persistent codex-agentd; Mini execution and local-safety owner
+
+GitHub:
+  source code, contracts, decisions, review, durable audit
+```
+
+An agent returns structured `peer_requests`; its local daemon dispatches those
+tasks directly to the peer and preserves root/parent task lineage. NATS handles
+wake-up, ACK/retry, progress, and compact results. Git inbox notes remain a
+fallback when the broker is unavailable.
+
+This cloud channel is software coordination only. It cannot grant motion,
+arming, Offboard, actuator, serial, MAVLink, GPIO, Arduino, motor, or sudo
+access, and it never replaces Pair B/LR24 vehicle communication. Deployment:
+`docs/codex_cloud_coordination_runbook.md`.

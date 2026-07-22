@@ -38,7 +38,12 @@ This directory is tracked by the existing `mock_vehicle_test` GitHub repo:
 git@github.com:ZHOUXINGAI/mock_vehicle_test.git
 ```
 
-Mandatory start sequence for cross-agent work:
+The preferred live path is the Huawei ECS NATS JetStream service plus one
+persistent `codex-agentd` on each Orin. It supports direct Orin1-to-Orin2
+structured tasks, ACK/retry, progress, and heartbeat. The Git sequence below is
+still mandatory for source synchronization and is the broker-outage fallback.
+
+Mandatory Git sequence for cross-agent work:
 
 ```bash
 cd /home/jetson/mock_vehicle_test/codex_ops
@@ -106,17 +111,25 @@ memory, goals, or logs.
 
 ## Work Loop
 
-1. The active Codex pulls and reads `/home/jetson/mock_vehicle_test/codex_ops`.
+1. The active Codex receives a versioned task from its local persistent worker,
+   or pulls the Git inbox when the broker is unavailable.
 2. The active Codex reads its local state file and this workflow.
 3. For architecture, communication, planner-deployment, or field-test protocol
    questions, read the primary shared meeting whiteboard before answering.
 4. If the task came from the peer, read the peer inbox note in `codex_ops`.
 5. Make changes only in the owned repo unless the user explicitly widens scope.
 6. Run the smallest useful verification.
-7. Write a `codex_ops` inbox note/event when the peer needs to act or should
-   learn a new fact.
+7. Return a structured `peer_requests` entry when the peer needs to act. The
+   local worker dispatches it directly; use a Git inbox note as durable context
+   or fallback.
 8. Commit/push only when the user asks, or when the active repo's standing
    instructions explicitly allow it.
+
+Full cloud deployment procedure:
+
+```text
+/home/jetson/mock_vehicle_test/docs/codex_cloud_coordination_runbook.md
+```
 
 ## Request Template
 

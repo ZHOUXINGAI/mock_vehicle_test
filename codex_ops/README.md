@@ -1,6 +1,6 @@
 # Codex Ops
 
-Shared coordination workspace for the rover/hardware Codex and the
+Shared coordination workspace for Orin1/Carrier, Orin2/Mini, and the local
 docking/planner Codex.
 
 This directory lives inside the existing `mock_vehicle_test` repo. It is not a
@@ -21,9 +21,30 @@ Rover Codex:   /home/jetson/.codex
 Docking Codex: /home/jetson/.codex_docking
 ```
 
-Use this workspace so the agents do not depend on copied chat snippets.
+Use this workspace so the agents do not depend on copied chat snippets. The
+preferred live path is the mTLS NATS JetStream service under `realtime/`; GitHub
+remains the source-code and audit path.
 
-## Quick Start
+## Live Coordination
+
+```text
+Huawei ECS NATS JetStream
+  codex.task.orin1-carrier -> persistent Orin1 worker
+  codex.task.orin2-mini    -> persistent Orin2 worker
+  codex.event.*            -> ACK/progress/result stream
+  codex.heartbeat.*        -> online status
+```
+
+The owner can emit a structured peer request and wake the other Orin directly.
+Boss no longer needs to copy the first agent's response into the second chat.
+
+Deployment and commissioning:
+
+```text
+docs/codex_cloud_coordination_runbook.md
+```
+
+## Git Fallback
 
 At the start of every Codex session:
 
@@ -71,7 +92,7 @@ Or use the wrapper:
 codex-ops-commit "ops: update rover/docking coordination"
 ```
 
-## GitHub Sync
+## GitHub Sync And Audit
 
 `codex_ops/` is tracked by the existing `mock_vehicle_test` GitHub repository:
 
@@ -100,7 +121,8 @@ codex_ops/scripts/codex_ops.py              helper CLI
 
 ## Rule Of Thumb
 
-Use GitHub for coordination facts, not robot runtime control.
+Use NATS for live software-work coordination and GitHub for code, contracts,
+decisions, and recovery after outages. Neither channel is robot runtime control.
 
 Runtime robot communication still belongs in MAVLink, LR24 compact packets,
 ROS 2 bridges, logs, and local safety controllers.

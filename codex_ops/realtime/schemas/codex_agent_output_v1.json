@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Codex coordination worker result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "summary",
+    "details",
+    "peer_requests",
+    "artifacts",
+    "requires_boss"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["completed", "blocked", "failed"]
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 20000
+    },
+    "details": {
+      "type": "string",
+      "maxLength": 50000
+    },
+    "requires_boss": {
+      "type": "boolean"
+    },
+    "artifacts": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "string",
+        "maxLength": 2048
+      }
+    },
+    "peer_requests": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["to", "task_type", "objective", "acceptance", "context_files"],
+        "properties": {
+          "to": {
+            "type": "string",
+            "enum": ["orin1-carrier", "orin2-mini"]
+          },
+          "task_type": {
+            "type": "string",
+            "enum": ["analysis", "code", "review", "diagnostic", "peer_request"]
+          },
+          "objective": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20000
+          },
+          "acceptance": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {"type": "string", "maxLength": 2048}
+          },
+          "context_files": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {"type": "string", "maxLength": 2048}
+          }
+        }
+      }
+    }
+  }
+}

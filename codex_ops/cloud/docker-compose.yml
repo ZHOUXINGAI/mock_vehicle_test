@@ -1,0 +1,22 @@
+services:
+  nats:
+    image: nats:2.14.1-alpine
+    container_name: codex-coordinator-nats
+    restart: unless-stopped
+    command: ["-c", "/etc/nats/nats-server.conf"]
+    ports:
+      - "4222:4222"
+      - "127.0.0.1:8222:8222"
+    volumes:
+      - ./nats-server.conf:/etc/nats/nats-server.conf:ro
+      - ./certs:/etc/nats/certs:ro
+      - nats-data:/data/jetstream
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8222/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+volumes:
+  nats-data:

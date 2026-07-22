@@ -3,6 +3,9 @@
 Every Codex working on rover/docking coordination must treat
 `mock_vehicle_test/codex_ops` as the shared office.
 
+The persistent NATS worker is the preferred real-time task path. GitHub is the
+canonical code/audit path and the fallback when the broker is unavailable.
+
 ## Mandatory Start Sequence
 
 1. `cd /home/jetson/mock_vehicle_test/codex_ops`
@@ -19,6 +22,10 @@ Every Codex working on rover/docking coordination must treat
 
 If `git pull` fails, say so and continue locally, but record that the shared
 state may be stale.
+
+For a task received through `codex-agentd`, first verify its `task_id`,
+`root_task_id`, target agent, repository, and base commit. Use structured
+`peer_requests` for peer action; never ask Boss to relay normal agent messages.
 
 ## Ownership
 
@@ -62,9 +69,16 @@ Before ending a meaningful work session:
 4. Commit and push `codex_ops/` through the existing `mock_vehicle_test` repo
    when network is available.
 
+For a live cloud task, also return a structured terminal result. Include commit
+hashes and artifact paths; do not put source trees, large logs, or images in the
+message payload.
+
 ## Hard Boundaries
 
 - Do not merge `/home/jetson/.codex` and `/home/jetson/.codex_docking`.
 - Do not use `codex_ops/` for secrets, API keys, private tokens, or huge logs.
 - Do not rely on chat memory alone for cross-agent state.
 - Robot runtime safety does not depend on `codex_ops/` being current.
+- Cloud tasks cannot grant arming, Offboard, motion, serial, MAVLink, GPIO,
+  Arduino, actuator, RC, or sudo capability.
+- NATS/FRP/OBS/GitHub must never enter the vehicle control loop.
