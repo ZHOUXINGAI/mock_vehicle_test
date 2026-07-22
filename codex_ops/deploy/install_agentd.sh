@@ -26,7 +26,16 @@ repo="$home/mock_vehicle_test"
 source_root="$repo/codex_ops"
 venv="$source_root/local/venv"
 service="codex-agentd-$agent.service"
-codex_binary="$(sudo -u "$user" bash -lc 'command -v codex' 2>/dev/null || true)"
+codex_binary="${CODEX_BINARY:-}"
+
+if [[ -z "$codex_binary" ]]; then
+  codex_binary="$(sudo -u "$user" bash -lc 'command -v codex' 2>/dev/null || true)"
+fi
+if [[ -z "$codex_binary" && -d "$home/.nvm/versions/node" ]]; then
+  codex_binary="$(find "$home/.nvm/versions/node" -mindepth 3 -maxdepth 3 \
+    \( -type f -o -type l \) -path '*/bin/codex' 2>/dev/null \
+    | sort -V | tail -n 1)"
+fi
 
 test -d "$repo/.git"
 test -f "$source_root/realtime/config/$agent.example.json"
