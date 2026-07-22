@@ -85,6 +85,34 @@ Orin2 audit status on 2026-07-22:
 - The repository does not yet contain an executable MiniState sender or a
   PlanCommand receiver with sequence, expiry, timeout, and Abort enforcement.
 
+Update from Orin1 at 2026-07-22 20:50 CST:
+
+- Boss reports Pair A, Pair B, and Pair C are all connected and their binding
+  LEDs remain steadily lit. This confirms RF binding only; packet loss and
+  latency are still awaiting the Pair B no-motion benchmark.
+- Pair B physical contract is finalized as `ADDR=1102`, full duplex, LR24 low
+  rate 2.4 KB/s, 500 mW, `57600 8N1`, Orin1 FHSS-ground and Orin2
+  FHSS-vehicle.
+- Orin1 Pair B is the CP2102 by-id device. The CH340 by-id device is the
+  Carrier Arduino and must not be opened by the Pair B program.
+- Wire contract and safety gate are now implemented in the shared repository.
+  Canonical document: `docs/lr24_pairb_wire_contract_v1.md`.
+- The shared frame is field ENU: `+x East`, `+y North`, yaw CCW from East.
+  Carrier sends `FIELD_ORIGIN`; plans and Mini state carry a matching
+  `origin_id`.
+- Sender timestamps are uint32 `CLOCK_BOOTTIME` milliseconds. Receivers derive
+  relative TTL from `(valid_until - timestamp)` and run expiry/watchdog from
+  their own monotonic clock; cross-computer clock equality is not assumed.
+- Implemented safety behavior includes CRC/length/version checks, wrapping
+  sequence checks, duplicate/old rejection, local speed/yaw/acceleration
+  limits, zero-only HOLD/STOP, command expiry, 750 ms watchdog, and local-only
+  Abort-latch clearing.
+- Virtual serial integration passed: Mini transmitted 40 states, Carrier saw
+  no sequence gap after startup, Mini accepted 20 HOLD commands, 8
+  CorridorPlans, and 8 FieldOrigins with zero gate rejections.
+- All current Pair B tests remain no-motion and are not connected to MAVROS,
+  PX4 command output, Arduino, or motors.
+
 ## Mock Docking Execution Contract
 
 - Mini first completes one stable orbit.

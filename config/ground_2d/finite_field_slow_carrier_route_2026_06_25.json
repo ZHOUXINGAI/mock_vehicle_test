@@ -1,0 +1,67 @@
+{
+  "name": "finite-field slow-carrier route",
+  "created_at_cst": "2026-06-25 00:46",
+  "source": {
+    "repo": "/home/jetson/easydocking",
+    "log": "/home/jetson/easydocking/docs/codex_cross_agent_log.md",
+    "entry": "2026-06-25 00:32 CST - Revision to rover: finite-field slow-carrier route",
+    "related_file": "scripts/run_ground_2d_corridor_sim.py",
+    "result_path": "results/ground_2d/20260625_003145_ground_2d",
+    "rover_corrected_preview": "/home/jetson/mock_vehicle_test/results/ground_2d_corridor_preview/20260627_013226_ground_2d"
+  },
+  "field": {
+    "route_frame_origin": "Mini orbit center at (0, 0)",
+    "sim_bounding_box_until_first_pass_m": [12.65, 11.37],
+    "recommended_safety_area_m": [20.0, 20.0],
+    "hard_demo_limit_m": [30.0, 30.0]
+  },
+  "mini": {
+    "orbit_center_m": [0.0, 0.0],
+    "orbit_radius_m": 4.5,
+    "turn_direction": "ccw",
+    "speed_mps": 0.9,
+    "required_stable_orbit_laps": 1.0,
+    "planning_phase_deg": 315.0,
+    "tangent_trigger_phase_deg": 249.817,
+    "tangent_point_m": [-1.553, -4.224],
+    "tangent_direction_unit": [0.939, -0.345]
+  },
+  "carrier": {
+    "start_m": [-7.0, -6.0],
+    "max_speed_mps": 0.7,
+    "max_accel_mps2": 0.30,
+    "arc_length_m": 6.178,
+    "arc_duration_sec": 17.652,
+    "terminal_path_until_first_pass_m": 7.715,
+    "must_remain_ahead_of_mini": true
+  },
+  "simulation_evidence": {
+    "completed": true,
+    "mini_arrival_delay_after_plan_sec": 25.724,
+    "first_pass_time_sec": 65.10,
+    "front_violations_until_first_pass": "0/335",
+    "minimum_terminal_distance_m": 0.497,
+    "terminal_lateral_mode": "straight-corridor",
+    "terminal_corridor_shape_ok": true,
+    "max_terminal_corridor_lateral_abs_m": 0.0031,
+    "max_terminal_heading_error_deg": 2.62
+  },
+  "first_field_pass_fail": {
+    "max_route_box_m": [30.0, 30.0],
+    "mini_speed_must_exceed_carrier_speed": true,
+    "mini_must_complete_one_orbit_before_exit": true,
+    "front_violation_required": 0,
+    "terminal_corridor_shape_required": true,
+    "max_terminal_corridor_lateral_abs_m": 0.20,
+    "loose_min_distance_m": 0.5,
+    "reject_conditions": [
+      "emergency stop",
+      "unexpected in-place spin",
+      "wrong direction",
+      "unexpected reversal",
+      "RC stop unavailable",
+      "QGC/manual stop unavailable",
+      "Arduino timeout brake unavailable"
+    ]
+  }
+}

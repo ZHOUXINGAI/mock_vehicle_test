@@ -1,0 +1,75 @@
+{
+  "name": "carrier-leader two-rover outdoor preflight",
+  "created_at_cst": "2026-06-27 01:00",
+  "active_architecture": "Carrier onboard Nano/Orin Nano is the central/leader docking computer",
+  "shared_meeting_state": "/home/jetson/easydocking/docs/codex_shared_meeting_state.md",
+  "carrier": {
+    "role": "leader",
+    "computer": "onboard Nano/Orin Nano",
+    "runs": [
+      "easydocking planner / CorridorPlan leader",
+      "LR24 compact link benchmark",
+      "Carrier local PX4/MAVROS or MAVLink bridge",
+      "logs"
+    ],
+    "local_pixhawk_link": "USB or local TELEM, not LR24 Pair B",
+    "lr24_pair_to_mini": "PairB ADDR=1102"
+  },
+  "mini": {
+    "role": "faster target",
+    "computer": "Mini onboard computer if available, otherwise Pixhawk-side bridge",
+    "sends": "timestamped compact state",
+    "receives": "compact plan/phase/speed/abort primitives",
+    "lr24_pair_to_carrier": "PairB ADDR=1102"
+  },
+  "ground_station": {
+    "role": "monitoring, QGC, logs, setup, manual safety, SSH/debug",
+    "not_role": "primary docking planner",
+    "carrier_qgc_link": "PairC ADDR=1103",
+    "mini_qgc_link": "PairA ADDR=1101",
+    "optional_link": "WiFi or 4G for SSH/log/video only"
+  },
+  "message_budget": {
+    "mini_state_bytes": [80, 150],
+    "current_mini_state_frame_bytes": 32,
+    "current_plan_command_frame_bytes": 37,
+    "current_corridor_plan_frame_bytes": 49,
+    "current_field_origin_frame_bytes": 31,
+    "current_ping_pong_frame_bytes": 19,
+    "mini_state_hz": [5, 10],
+    "planner_command_hz": [1, 5],
+    "abort": "event triggered, highest priority"
+  },
+  "stale_policy": {
+    "initial_rover_stale_threshold_ms": 300,
+    "on_stale": "freeze, replan, or abort",
+    "required_fields": [
+      "vehicle_id",
+      "sequence_number",
+      "timestamp",
+      "position",
+      "velocity",
+      "yaw",
+      "health"
+    ]
+  },
+  "route": {
+    "source": "config/ground_2d/finite_field_slow_carrier_route_2026_06_25.json",
+    "field_limit_m": [30.0, 30.0],
+    "mini_speed_mps": 0.9,
+    "carrier_max_speed_mps": 0.7,
+    "mini_orbit_radius_m": 4.5,
+    "mini_direction": "ccw"
+  },
+  "first_morning_steps": [
+    "no-motion LR24 ping/echo benchmark",
+    "offline local CorridorPlan preview in mock_vehicle_test",
+    "no-motion MiniState state-tx/state-rx benchmark",
+    "no-motion PlanCommand command-tx/command-rx benchmark",
+    "no-motion Pair B bidirectional dry-run with MiniState uplink and HOLD PlanCommand downlink",
+    "wheels-lifted RC/QGC/manual stop verification",
+    "wheels-lifted Arduino timeout brake verification",
+    "single-rover low-speed ground primitive",
+    "two-rover route only after explicit approval"
+  ]
+}

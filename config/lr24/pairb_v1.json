@@ -1,0 +1,55 @@
+{
+  "contract": "lr24-pairb-v1",
+  "radio": {
+    "pair": "B",
+    "module_address": 1102,
+    "work_mode": "full_duplex",
+    "rate_mode": "low_2.4KBps",
+    "tx_power_mw": 500,
+    "frequency_mode_orin1": "FHSS_ground",
+    "frequency_mode_orin2": "FHSS_vehicle",
+    "serial_baud": 57600,
+    "serial_format": "8N1"
+  },
+  "orin1_carrier": {
+    "role": "leader",
+    "pairb_device": "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0",
+    "local_pixhawk_device": "/dev/serial/by-id/usb-Auterion_PX4_FMU_v6C.x_0-if00",
+    "mav_sys_id": 1
+  },
+  "orin2_mini": {
+    "role": "executor",
+    "pairb_device": "DISCOVER_ON_ORIN2_WITH_DEV_SERIAL_BY_ID",
+    "mav_sys_id": 2
+  },
+  "rates": {
+    "mini_state_hz": 10.0,
+    "plan_command_hz": 5.0,
+    "corridor_plan_hz": 0.2,
+    "field_origin_hz": 0.2,
+    "abort_hz": 10.0,
+    "abort_repeat_sec": 1.0
+  },
+  "timeouts_ms": {
+    "mini_state_stale": 300,
+    "plan_command_validity": 500,
+    "mini_command_watchdog": 750,
+    "corridor_plan_validity": 30000
+  },
+  "local_limits": {
+    "mini_max_speed_mps": 1.0,
+    "mini_max_yaw_rate_radps": 0.6,
+    "mini_max_accel_mps2": 0.5,
+    "carrier_max_speed_mps": 0.7,
+    "carrier_max_accel_mps2": 0.3
+  },
+  "field_frame": {
+    "origin_id": 1,
+    "latitude_deg": null,
+    "longitude_deg": null,
+    "altitude_m": null,
+    "axes": "ENU",
+    "yaw": "CCW_FROM_EAST"
+  },
+  "motion_output_default": "disabled"
+}
