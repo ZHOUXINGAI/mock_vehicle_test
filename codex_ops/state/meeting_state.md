@@ -19,21 +19,28 @@ first place both agents read for current decisions.
 - Codex agents coordinate through `mock_vehicle_test/codex_ops` plus each code
   repo's handoff/state docs.
 - The two Codex homes remain separate.
+- Orin2 / Mini Codex owns the Mini rover execution layer and the
+  `MiniState`/`PlanCommand` LR24 endpoint. It does not own or run the primary
+  `easydocking` planner.
+- Orin1 / Carrier is the docking leader: it receives Mini state, runs the
+  planner, and emits phase, primitive, corridor, or abort commands.
 
 ## Active Repositories
 
 ```text
 codex_ops:
-  /home/jetson/mock_vehicle_test/codex_ops
-  tracked inside: /home/jetson/mock_vehicle_test
+  Orin1: /home/jetson/mock_vehicle_test/codex_ops
+  Orin2: /home/seeed/mock_vehicle_test/codex_ops
+  tracked inside: mock_vehicle_test on each host
   parent remote: git@github.com:ZHOUXINGAI/mock_vehicle_test.git
 
 rover:
-  /home/jetson/mock_vehicle_test
+  Orin1: /home/jetson/mock_vehicle_test
+  Orin2: /home/seeed/mock_vehicle_test
   remote: git@github.com:ZHOUXINGAI/mock_vehicle_test.git
 
 docking:
-  /home/jetson/easydocking
+  Orin1: /home/jetson/easydocking
   remote: git@github.com:ZHOUXINGAI/easydocking.git
 ```
 
@@ -43,8 +50,13 @@ docking:
 rover Codex:
   real rover, PX4 rover, MAVROS, QGC, RC safety, Arduino/D24A, LR24 field tests
 
+Orin2 / Mini rover Codex (current /home/seeed host):
+  Mini execution, timestamped MiniState sender, validated PlanCommand receiver,
+  body-frame primitive adapter, local timeout/stop/abort; no primary planner
+
 docking Codex:
-  easydocking planner, CorridorPlan, simulation, metrics, reports, algorithm contracts
+  Orin1 / Carrier leader, easydocking planner, CorridorPlan, simulation,
+  metrics, reports, algorithm contracts
 ```
 
 ## Current LR24 Topology
@@ -63,6 +75,16 @@ PairA / ADDR=1101:
   QGC monitors Mini, MAV_SYS_ID=2
 ```
 
+Orin2 audit status on 2026-07-22:
+
+- Mini Pixhawk `MAV_SYS_ID=2` was confirmed by a direct read-only MAVLink
+  parameter query.
+- PairA QGC transport has not yet been verified from the ground station.
+- PairB physical UART/radio mapping and Carrier-to-Mini packet exchange have
+  not yet been verified.
+- The repository does not yet contain an executable MiniState sender or a
+  PlanCommand receiver with sequence, expiry, timeout, and Abort enforcement.
+
 ## Mock Docking Execution Contract
 
 - Mini first completes one stable orbit.
@@ -74,11 +96,8 @@ PairA / ADDR=1101:
 - Rover low-level execution uses body-frame bounded `(v_mps, omega_radps)`
   primitives, not raw global `vx/vy` Offboard commands.
 
-Detailed rover design:
-
-```text
-/home/jetson/mock_vehicle_test/docs/mock_docking_hardware_execution_design_2026_07_22.md
-```
+The detailed Mini hardware-execution design document is not present in the
+current shared clone. Do not treat its former path as an implemented contract.
 
 ## Communication Rule
 
