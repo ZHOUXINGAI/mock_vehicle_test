@@ -4,6 +4,7 @@ import os
 import pty
 import select
 import sys
+import termios
 import threading
 import time
 import unittest
@@ -146,6 +147,10 @@ class SerialTunnelIntegrationTest(unittest.TestCase):
             mini = MavlinkSerialTunnelTransport(
                 path_b, 57600, 2, 1, expected_source_system=1
             )
+            self.assertEqual(termios.tcgetattr(carrier.fd)[4], termios.B57600)
+            self.assertEqual(termios.tcgetattr(carrier.fd)[5], termios.B57600)
+            self.assertEqual(termios.tcgetattr(mini.fd)[4], termios.B57600)
+            self.assertEqual(termios.tcgetattr(mini.fd)[5], termios.B57600)
             os.close(slave_a)
             os.close(slave_b)
             slave_a = -1

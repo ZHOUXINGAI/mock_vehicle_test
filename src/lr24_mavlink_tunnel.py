@@ -468,11 +468,20 @@ def _open_serial(port: str, baud: int) -> int:
     attrs = termios.tcgetattr(fd)
     attrs[0] = 0
     attrs[1] = 0
-    attrs[2] = BAUD[baud] | termios.CLOCAL | termios.CREAD | termios.CS8
+    attrs[2] = termios.CLOCAL | termios.CREAD | termios.CS8
     attrs[3] = 0
+    # Python's tcsetattr() takes input/output speed from indexes 4 and 5.
+    # Putting B57600 only in c_cflag leaves many USB UARTs at their previous
+    # speed (observed as 9600 on the Pair B CP2102).
+    attrs[4] = BAUD[baud]
+    attrs[5] = BAUD[baud]
     attrs[6][termios.VMIN] = 0
     attrs[6][termios.VTIME] = 1
     termios.tcsetattr(fd, termios.TCSANOW, attrs)
+    applied = termios.tcgetattr(fd)
+    if applied[4] != BAUD[baud] or applied[5] != BAUD[baud]:
+        os.close(fd)
+        raise OSError(f"serial port rejected baud {baud}: {port}")
     termios.tcflush(fd, termios.TCIOFLUSH)
     return fd
 
