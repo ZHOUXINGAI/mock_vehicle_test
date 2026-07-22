@@ -1,11 +1,11 @@
 {
   "agent": "rover",
   "needs": [],
-  "notes": "12/12 tests pass. Waiting for PairB USB/CP2102 data connection; no serial dry-run or motion performed.",
+  "notes": "PairA=ground station USB<->Mini TELEM1; PairB=Orin1 CP2102 USB<->Mini TELEM2. 12 tests pass. No parameter writes or motion.",
   "repo": "/home/seeed/mock_vehicle_test",
   "repo_git": {
     "branch": "master",
-    "dirty_count": 32,
+    "dirty_count": 35,
     "dirty_sample": [
       "M AGENT_STATE.md",
       " M arduino/d24a_pixhawk_differential_pwm_bridge/d24a_pixhawk_differential_pwm_bridge.ino",
@@ -13,9 +13,12 @@
       " M arduino/d24a_serial_bridge/d24a_serial_bridge.ino",
       " M codex_ops/agents/rover.json",
       " M codex_ops/events/2026/2026-07-22.jsonl",
+      " M codex_ops/state/meeting_state.md",
+      " M config/lr24/pairb_v1.json",
       " M docs/current_rover_success_baseline_2026_06_16.md",
       " M docs/d24a_current_motor_mapping.md",
       " M docs/differential_rover_offboard_tests_2026_06_21.md",
+      " M docs/lr24_pairb_wire_contract_v1.md",
       " M docs/orin_nano_d24a_four_wheel_wiring.md",
       " M scripts/d24a_raw_motor_test.py",
       " M scripts/install_mavros_humble.sh",
@@ -23,16 +26,13 @@
       " M scripts/run_real_rover_mavros_differential_offboard_l_turn.sh",
       " M scripts/run_real_rover_mavros_differential_offboard_out_and_back_5m.sh",
       " M scripts/run_real_rover_mavros_offboard_smoke.sh",
-      " M src/mavros_rc_io_watch.py",
-      " M src/real_rover_mavros_offboard_l_turn.py",
-      " M src/real_rover_mavros_offboard_smoke.py",
-      " M tools/run-qgroundcontrol.sh"
+      " M src/mavros_rc_io_watch.py"
     ],
-    "head": "668bc13",
+    "head": "9c16eec",
     "remote": "git@github.com:ZHOUXINGAI/mock_vehicle_test.git",
     "repo": "/home/seeed/mock_vehicle_test"
   },
   "status": "idle",
-  "task": "blocked: Orin2 PairB CP2102 is not enumerated",
-  "updated_at": "2026-07-22T20:58:58+08:00"
+  "task": "done: corrected PairA/PairB topology and reported TELEM2 transport gap",
+  "updated_at": "2026-07-22T21:05:31+08:00"
 }

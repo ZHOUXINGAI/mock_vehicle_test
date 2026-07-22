@@ -24,14 +24,30 @@ Orin1 currently identifies the Pair B USB radio as:
 /dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0
 ```
 
+Pair B endpoint roles and wiring are:
+
+```text
+Orin1 / Carrier: GROUND radio -> CP2102 USB -> Orin1 Linux
+Orin2 / Mini:    VEHICLE radio -> Pixhawk TELEM2
+```
+
 The CH340 device is the Carrier Arduino, not Pair B:
 
 ```text
 /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
 ```
 
-Orin2 must record its own `/dev/serial/by-id/...` path before starting the
-endpoint. Do not use a bare `/dev/ttyUSB0` in a persistent service.
+Orin2 does not have, and must not search for, a Pair B Linux
+`/dev/serial/by-id/...` path. Its persistent local computer endpoint is the
+Mini Pixhawk USB device; Pair B itself terminates at Pixhawk `TELEM2`.
+
+The current `lr24_pairb_dry_run.py` raw-serial Mini mode is valid only for a
+temporary direct-USB Mini radio setup. It cannot be pointed at the Pixhawk USB
+port: PX4 does not transparently relay arbitrary `L2` bytes between USB and
+`TELEM2`. The compact `L2` frame must be carried by an agreed MAVLink routing
+adapter (for example MAVLink `TUNNEL` or an equivalent reviewed envelope)
+before the physical Pair B test. This adapter is not implemented or validated
+yet; do not enable motion based on the existing raw-serial dry-run.
 
 ## Shared Field Frame
 

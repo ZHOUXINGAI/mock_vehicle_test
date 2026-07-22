@@ -63,7 +63,7 @@ docking Codex:
 
 ```text
 PairB / ADDR=1102:
-  Carrier <-> Mini
+  Orin1 Carrier USB/CP2102 (GROUND) <-> Orin2 Mini Pixhawk TELEM2 (VEHICLE)
   compact MiniState / CorridorPlan / PlanCommand / Abort
 
 PairC / ADDR=1103:
@@ -71,17 +71,22 @@ PairC / ADDR=1103:
   QGC monitors Carrier, MAV_SYS_ID=1
 
 PairA / ADDR=1101:
-  Ground station <-> Mini Pixhawk
+  Ground-station computer USB radio (GROUND) <-> Orin2 Mini Pixhawk TELEM1 (VEHICLE)
   QGC monitors Mini, MAV_SYS_ID=2
 ```
+
+Orin2 does not have a Linux `/dev/serial/by-id` endpoint for Pair B. Pair B
+terminates at the Mini Pixhawk `TELEM2` port; only Orin1/Carrier opens the Pair
+B CP2102 directly. Pair B payloads therefore need a PX4/MAVLink-compatible
+transport adapter and cannot use the raw two-computer serial dry-run unchanged.
 
 Orin2 audit status on 2026-07-22:
 
 - Mini Pixhawk `MAV_SYS_ID=2` was confirmed by a direct read-only MAVLink
   parameter query.
 - PairA QGC transport has not yet been verified from the ground station.
-- PairB physical UART/radio mapping and Carrier-to-Mini packet exchange have
-  not yet been verified.
+- PairB physical mapping is known, but its Pixhawk `TELEM2` MAVLink transport
+  and Carrier-to-Mini packet exchange have not yet been configured or verified.
 - The repository does not yet contain an executable MiniState sender or a
   PlanCommand receiver with sequence, expiry, timeout, and Abort enforcement.
 

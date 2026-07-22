@@ -13,13 +13,18 @@
   },
   "orin1_carrier": {
     "role": "leader",
+    "radio_role": "ground",
     "pairb_device": "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0",
     "local_pixhawk_device": "/dev/serial/by-id/usb-Auterion_PX4_FMU_v6C.x_0-if00",
     "mav_sys_id": 1
   },
   "orin2_mini": {
     "role": "executor",
-    "pairb_device": "DISCOVER_ON_ORIN2_WITH_DEV_SERIAL_BY_ID",
+    "radio_role": "vehicle",
+    "pairb_device": "PX4_TELEM2",
+    "linux_by_id_expected": false,
+    "transport_adapter": "MAVLINK_ENCAPSULATION_PENDING",
+    "local_pixhawk_device": "/dev/serial/by-id/usb-Auterion_PX4_FMU_v6C.x_0-if00",
     "mav_sys_id": 2
   },
   "rates": {
