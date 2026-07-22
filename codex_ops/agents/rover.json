@@ -1,11 +1,11 @@
 {
   "agent": "rover",
   "needs": [],
-  "notes": "Local setup complete; 19 tests pass; TELEM2 persisted; mini_mavros connected/disarmed. First 120s run sent 1160 states but received no Carrier frames; no motion.",
+  "notes": "Local setup complete and TELEM2 persisted. MAVROS was stopped cleanly after no Carrier ack; no control or endpoint process remains. Restart only for synchronized no-motion rerun.",
   "repo": "/home/seeed/mock_vehicle_test",
   "repo_git": {
     "branch": "master",
-    "dirty_count": 31,
+    "dirty_count": 30,
     "dirty_sample": [
       "M AGENT_STATE.md",
       " M arduino/d24a_pixhawk_differential_pwm_bridge/d24a_pixhawk_differential_pwm_bridge.ino",
@@ -28,11 +28,11 @@
       " M tools/run-qgroundcontrol.sh",
       "?? Hardware_Debug.md"
     ],
-    "head": "80ca655",
+    "head": "7641fd2",
     "remote": "git@github.com:ZHOUXINGAI/mock_vehicle_test.git",
     "repo": "/home/seeed/mock_vehicle_test"
   },
   "status": "idle",
   "task": "waiting: synchronized Carrier PairB rerun after zero-rx Mini attempt",
-  "updated_at": "2026-07-22T23:12:47+08:00"
+  "updated_at": "2026-07-22T23:15:21+08:00"
 }
