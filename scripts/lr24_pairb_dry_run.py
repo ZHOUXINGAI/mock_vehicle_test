@@ -8,8 +8,9 @@ Carrier role:
 Mini role:
   transmit simulated MiniState frames and receive PlanCommand frames.
 
-This tool does not connect to MAVROS, PX4, ROS, or motor drivers. It is the
-first mixed-traffic radio test before docking bridge integration.
+The current physical topology uses MAVLink 2 TUNNEL on Pair B: Carrier opens
+the LR24 CP2102 directly, while Mini attaches a ROS endpoint to the MAVROS
+router connected to Pixhawk USB. Neither role publishes motor commands.
 """
 
 from __future__ import annotations
@@ -17,10 +18,7 @@ from __future__ import annotations
 import argparse
 import csv
 import math
-import os
-import select
 import sys
-import termios
 import time
 from pathlib import Path
 
@@ -45,18 +43,11 @@ from lr24_compact_protocol import (  # noqa: E402
     frame_sizes,
 )
 from lr24_command_guard import CommandGuardPolicy, MiniCommandGate  # noqa: E402
-
-
-BAUD = {
-    9600: termios.B9600,
-    19200: termios.B19200,
-    38400: termios.B38400,
-    57600: termios.B57600,
-    115200: termios.B115200,
-    230400: termios.B230400,
-    460800: termios.B460800,
-    921600: termios.B921600,
-}
+from lr24_mavlink_tunnel import (  # noqa: E402
+    TUNNEL_COMPONENT_ID,
+    CompactFrameTransport,
+    make_transport,
+)
 
 
 def monotonic_ms() -> int:
@@ -71,37 +62,38 @@ def require_no_motion(args: argparse.Namespace) -> None:
         )
 
 
-def open_serial(port: str, baud: int) -> int:
-    if baud not in BAUD:
-        raise SystemExit(f"Unsupported baud {baud}; supported: {sorted(BAUD)}")
-    fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
-    attrs = termios.tcgetattr(fd)
-    attrs[0] = 0
-    attrs[1] = 0
-    attrs[2] = BAUD[baud] | termios.CLOCAL | termios.CREAD | termios.CS8
-    attrs[3] = 0
-    attrs[6][termios.VMIN] = 0
-    attrs[6][termios.VTIME] = 1
-    termios.tcsetattr(fd, termios.TCSANOW, attrs)
-    termios.tcflush(fd, termios.TCIOFLUSH)
-    return fd
+def open_transport(args: argparse.Namespace) -> CompactFrameTransport:
+    return make_transport(
+        args.transport,
+        port=args.port,
+        baud=args.baud,
+        source_system=args.source_system,
+        target_system=args.target_system,
+        source_component=args.source_component,
+        target_component=args.target_component,
+        expected_source_system=args.expected_source_system,
+        topic_prefix=args.mavros_topic_prefix,
+        router_add_service=args.mavros_router_service,
+    )
 
 
-def read_frames(fd: int, reader: FrameReader, timeout_sec: float) -> list[Frame]:
-    readable, _, _ = select.select([fd], [], [], timeout_sec)
-    if not readable:
-        return []
-    try:
-        data = os.read(fd, 4096)
-    except BlockingIOError:
-        return []
-    if not data:
-        return []
-    return reader.feed(data)
+def read_frames(
+    transport: CompactFrameTransport,
+    reader: FrameReader,
+    timeout_sec: float,
+) -> list[Frame]:
+    frames: list[Frame] = []
+    for data in transport.receive(timeout_sec):
+        frames.extend(reader.feed(data))
+    return frames
 
 
-def write_frame(fd: int, msg_type: MessageType, payload: bytes) -> None:
-    os.write(fd, encode_frame(msg_type, payload))
+def write_frame(
+    transport: CompactFrameTransport,
+    msg_type: MessageType,
+    payload: bytes,
+) -> None:
+    transport.send(encode_frame(msg_type, payload))
 
 
 def simulated_mini_state(args: argparse.Namespace, seq: int, period: float) -> MiniState:
@@ -195,7 +187,7 @@ def carrier_role(args: argparse.Namespace) -> int:
     if (abs(args.v_mps) > 1.0e-6 or abs(args.omega_radps) > 1.0e-6) and not args.allow_nonhold_command:
         raise SystemExit("Nonzero command requires --allow-nonhold-command.")
 
-    fd = open_serial(args.port, args.baud)
+    transport = open_transport(args)
     reader = FrameReader()
     end = time.monotonic() + args.duration_sec if args.duration_sec > 0 else None
     command_period = 1.0 / max(0.1, args.command_rate_hz)
@@ -234,7 +226,7 @@ def carrier_role(args: argparse.Namespace) -> int:
         ],
     )
 
-    print(f"carrier dry-run on {args.port} baud={args.baud}")
+    print(f"carrier dry-run transport={transport.description}")
     print(
         f"command target phase={desired_phase.name} v={args.v_mps:.2f} "
         f"omega={args.omega_radps:.3f} rate={args.command_rate_hz:.1f}Hz"
@@ -248,7 +240,7 @@ def carrier_role(args: argparse.Namespace) -> int:
         )
     try:
         while end is None or time.monotonic() < end:
-            for frame in read_frames(fd, reader, 0.02):
+            for frame in read_frames(transport, reader, 0.02):
                 if frame.msg_type != MessageType.MINI_STATE:
                     print(f"rx {describe_frame(frame)}")
                     continue
@@ -280,7 +272,7 @@ def carrier_role(args: argparse.Namespace) -> int:
             now = time.monotonic()
             if now >= next_field_origin:
                 origin = make_field_origin(args, field_origin_seq)
-                write_frame(fd, MessageType.FIELD_ORIGIN, origin.encode())
+                write_frame(transport, MessageType.FIELD_ORIGIN, origin.encode())
                 field_origin_count += 1
                 print(
                     f"tx FIELD_ORIGIN seq={field_origin_seq} id={origin.origin_id} "
@@ -295,7 +287,7 @@ def carrier_role(args: argparse.Namespace) -> int:
                 and now >= next_corridor_plan
             ):
                 plan = make_corridor_plan(args, corridor_plan_seq)
-                write_frame(fd, MessageType.CORRIDOR_PLAN, plan.encode())
+                write_frame(transport, MessageType.CORRIDOR_PLAN, plan.encode())
                 corridor_plan_count += 1
                 print(f"tx CORRIDOR_PLAN seq={corridor_plan_seq}")
                 if csv_bundle:
@@ -353,7 +345,7 @@ def carrier_role(args: argparse.Namespace) -> int:
                 max_accel_mps2=args.max_accel_mps2,
                 flags=0,
             )
-            write_frame(fd, MessageType.PLAN_COMMAND, cmd.encode())
+            write_frame(transport, MessageType.PLAN_COMMAND, cmd.encode())
             command_count += 1
             stale_text = "no_state" if stale_ms is None else f"{stale_ms:.1f}ms"
             print(f"tx PLAN_COMMAND seq={command_seq} phase={effective_phase.name} stale={stale_text}")
@@ -376,6 +368,7 @@ def carrier_role(args: argparse.Namespace) -> int:
             command_seq += 1
             next_command = now + command_period
     finally:
+        transport.close()
         if csv_bundle:
             _writer, handle = csv_bundle
             handle.close()
@@ -391,7 +384,7 @@ def carrier_role(args: argparse.Namespace) -> int:
 
 def mini_role(args: argparse.Namespace) -> int:
     require_no_motion(args)
-    fd = open_serial(args.port, args.baud)
+    transport = open_transport(args)
     reader = FrameReader()
     end = time.monotonic() + args.duration_sec if args.duration_sec > 0 else None
     state_period = 1.0 / max(0.1, args.state_rate_hz)
@@ -420,7 +413,7 @@ def mini_role(args: argparse.Namespace) -> int:
     )
 
     print(
-        f"mini dry-run on {args.port} baud={args.baud} "
+        f"mini dry-run transport={transport.description} "
         f"state_rate={args.state_rate_hz:.1f}Hz simulate_orbit={args.simulate_orbit}"
     )
     try:
@@ -428,7 +421,7 @@ def mini_role(args: argparse.Namespace) -> int:
             now = time.monotonic()
             if now >= next_state:
                 msg = simulated_mini_state(args, state_seq, state_period)
-                write_frame(fd, MessageType.MINI_STATE, msg.encode())
+                write_frame(transport, MessageType.MINI_STATE, msg.encode())
                 print(f"tx MINI_STATE seq={state_seq}")
                 if csv_bundle:
                     writer, _handle = csv_bundle
@@ -449,7 +442,7 @@ def mini_role(args: argparse.Namespace) -> int:
                 state_count += 1
                 next_state = now + state_period
 
-            for frame in read_frames(fd, reader, 0.02):
+            for frame in read_frames(transport, reader, 0.02):
                 if frame.msg_type == MessageType.FIELD_ORIGIN:
                     result = gate.ingest(frame, monotonic_ms())
                     print(f"rx {describe_frame(frame)} gate={result.decision.value}:{result.reason}")
@@ -524,6 +517,7 @@ def mini_role(args: argparse.Namespace) -> int:
                         }
                     )
     finally:
+        transport.close()
         if csv_bundle:
             _writer, handle = csv_bundle
             handle.close()
@@ -544,8 +538,20 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="role", required=True)
 
     def add_common(p: argparse.ArgumentParser) -> None:
-        p.add_argument("--port", required=True)
+        p.add_argument(
+            "--transport",
+            choices=["raw-serial", "mavlink-serial", "mavros-router"],
+            default="raw-serial",
+        )
+        p.add_argument("--port")
         p.add_argument("--baud", type=int, default=57600)
+        p.add_argument("--source-system", type=int)
+        p.add_argument("--target-system", type=int)
+        p.add_argument("--source-component", type=int, default=TUNNEL_COMPONENT_ID)
+        p.add_argument("--target-component", type=int, default=TUNNEL_COMPONENT_ID)
+        p.add_argument("--expected-source-system", type=int)
+        p.add_argument("--mavros-topic-prefix", default="/pairb_tunnel")
+        p.add_argument("--mavros-router-service", default="auto")
         p.add_argument("--duration-sec", type=float, default=60.0)
         p.add_argument("--confirm-no-motion", action="store_true")
         p.add_argument("--csv")
@@ -587,7 +593,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--mini-speed-mps", type=float, default=0.9)
     p.add_argument("--carrier-max-speed-mps", type=float, default=0.7)
     p.add_argument("--target-front-gap-m", type=float, default=0.35)
-    p.set_defaults(func=carrier_role)
+    p.set_defaults(
+        func=carrier_role,
+        transport="mavlink-serial",
+        port=(
+            "/dev/serial/by-id/"
+            "usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0"
+        ),
+        source_system=1,
+        target_system=2,
+        expected_source_system=2,
+    )
 
     p = sub.add_parser("mini", help="Mini endpoint dry run.")
     add_common(p)
@@ -602,7 +618,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--local-max-yaw-rate-radps", type=float, default=0.6)
     p.add_argument("--local-max-accel-mps2", type=float, default=0.5)
     p.add_argument("--command-watchdog-ms", type=int, default=750)
-    p.set_defaults(func=mini_role)
+    p.set_defaults(
+        func=mini_role,
+        transport="mavros-router",
+        port=None,
+        source_system=2,
+        target_system=1,
+        expected_source_system=1,
+    )
 
     return parser
 

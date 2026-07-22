@@ -10,26 +10,34 @@ if [ -z "$ROLE" ]; then
 Usage:
   CONFIRM_NO_MOTION=true ./scripts/run_lr24_pairb_dry_run.sh <carrier|mini> [args...]
 
-Mini side example:
+Mini / Orin2 example (Pixhawk USB MAVROS must already be running):
   CONFIRM_NO_MOTION=true ./scripts/run_lr24_pairb_dry_run.sh mini \
-    --port /dev/serial/by-id/<B-MINI-LR24> \
     --duration-sec 120 \
     --state-rate-hz 10 \
     --simulate-orbit
 
-Carrier side example:
+Carrier / Orin1 example (Pair B CP2102 path is the built-in default):
   CONFIRM_NO_MOTION=true ./scripts/run_lr24_pairb_dry_run.sh carrier \
-    --port /dev/serial/by-id/<B-CARRIER-LR24> \
     --duration-sec 120 \
     --command-rate-hz 2 \
     --phase hold \
     --stale-ms 300 \
     --send-corridor-plan \
     --corridor-plan-rate-hz 0.2
+
+Legacy direct-radio raw serial requires an explicit override:
+  --transport raw-serial --port /dev/serial/by-id/<radio>
 EOF
   exit 2
 fi
 shift
+
+if [ "$ROLE" = "mini" ]; then
+  # The MAVROS Router transport imports rclpy and mavros_msgs. Load the
+  # repository's standard ROS 2 environment in fresh terminals and over SSH.
+  # shellcheck disable=SC1091
+  source "$REPO_DIR/scripts/env.sh"
+fi
 
 if [ "${CONFIRM_NO_MOTION:-false}" != "true" ]; then
   echo "Refusing to run LR24 Pair B dry-run until CONFIRM_NO_MOTION=true." >&2

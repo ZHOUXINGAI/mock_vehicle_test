@@ -157,6 +157,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device", default=DEFAULT_DEVICE)
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--source-system", type=int, default=246)
+    parser.add_argument("--expect-system-id", type=int)
+    parser.add_argument("--expect-component-id", type=int, default=1)
     parser.add_argument("--heartbeat-timeout", type=float, default=15.0)
     parser.add_argument("--timeout", type=float, default=2.5)
     parser.add_argument("--retries", type=int, default=3)
@@ -184,6 +186,22 @@ def main() -> int:
     heartbeat = master.wait_heartbeat(timeout=args.heartbeat_timeout)
     if heartbeat is None:
         raise TimeoutError("no Pixhawk heartbeat")
+    if (
+        args.expect_system_id is not None
+        and heartbeat.get_srcSystem() != args.expect_system_id
+    ):
+        raise RuntimeError(
+            f"wrong Pixhawk MAV_SYS_ID: expected {args.expect_system_id}, "
+            f"received {heartbeat.get_srcSystem()}"
+        )
+    if (
+        args.expect_component_id is not None
+        and heartbeat.get_srcComponent() != args.expect_component_id
+    ):
+        raise RuntimeError(
+            f"wrong Pixhawk component: expected {args.expect_component_id}, "
+            f"received {heartbeat.get_srcComponent()}"
+        )
 
     if args.command == "get":
         values = [

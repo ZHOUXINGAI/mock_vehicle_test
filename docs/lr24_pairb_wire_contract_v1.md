@@ -41,13 +41,45 @@ Orin2 does not have, and must not search for, a Pair B Linux
 `/dev/serial/by-id/...` path. Its persistent local computer endpoint is the
 Mini Pixhawk USB device; Pair B itself terminates at Pixhawk `TELEM2`.
 
-The current `lr24_pairb_dry_run.py` raw-serial Mini mode is valid only for a
-temporary direct-USB Mini radio setup. It cannot be pointed at the Pixhawk USB
-port: PX4 does not transparently relay arbitrary `L2` bytes between USB and
-`TELEM2`. The compact `L2` frame must be carried by an agreed MAVLink routing
-adapter (for example MAVLink `TUNNEL` or an equivalent reviewed envelope)
-before the physical Pair B test. This adapter is not implemented or validated
-yet; do not enable motion based on the existing raw-serial dry-run.
+The Pair B adapter carries exactly one complete compact `L2` frame in one
+unsigned MAVLink 2 `TUNNEL` message (`msgid=385`, `payload_type=0`). Both
+computer endpoints use `MAV_COMP_ID_TUNNEL_NODE=242`:
+
+```text
+Carrier source/target: 1.242 -> 2.242
+Mini source/target:    2.242 -> 1.242
+```
+
+Orin1 opens the Pair B CP2102 at 57600 and parses MAVLink directly. Orin2 uses
+the MAVROS Router ROS endpoint:
+
+```text
+/pairb_tunnel/mavlink_source  Pixhawk/PairB -> Mini bridge
+/pairb_tunnel/mavlink_sink    Mini bridge -> Pixhawk/PairB
+```
+
+Each endpoint emits a 1 Hz component heartbeat so PX4 and MAVROS learn the
+`system.component` route. The Mini PX4 forwards targeted packets between USB
+and TELEM2; it never parses or executes the compact payload itself. The legacy
+raw-serial transport remains available only with explicit
+`--transport raw-serial` for a temporary two-USB-radio bench setup.
+
+Mini TELEM2 requires the following post-reboot values:
+
+```text
+MAV_SYS_ID=2
+MAV_PROTO_VER=2
+MAV_1_CONFIG=102       # TELEM2
+MAV_1_MODE=7           # Minimal
+MAV_1_FORWARD=1
+MAV_1_FLOW_CTRL=0
+MAV_1_RADIO_CTL=0
+MAV_1_RATE=1200        # PX4 output budget in bytes/s
+SER_TEL2_BAUD=57600
+```
+
+The guarded configuration command and full no-motion sequence are documented
+in `docs/lr24_pairb_mavlink_tunnel_runbook.md`.
 
 ## Shared Field Frame
 
@@ -259,12 +291,15 @@ checks; there is no wireless clear-abort command.
 
 ## Rates And Budget
 
+MAVLink 2 TUNNEL adds 17 bytes to each current compact frame after payload
+zero truncation:
+
 ```text
-MiniState:       32 bytes x 10 Hz = 320 B/s
-PlanCommand:     37 bytes x  5 Hz = 185 B/s
-CorridorPlan:    49 bytes x 0.2 Hz, plus event send
-FieldOrigin:     31 bytes x 0.2 Hz during setup
-ABORT:           21 bytes x 10 Hz for one second
+MiniState:       49 bytes x 10 Hz = 490 B/s
+PlanCommand:     54 bytes x  5 Hz = 270 B/s
+CorridorPlan:    66 bytes x 0.2 Hz, plus event send
+FieldOrigin:     48 bytes x 0.2 Hz during setup
+ABORT:           38 bytes x 10 Hz for one second
 ```
 
 Normal mixed traffic remains well below the LR24 low-rate 2.4 KB/s mode.
@@ -288,8 +323,11 @@ Implementation files:
 src/lr24_compact_protocol.py
 src/lr24_command_guard.py
 src/lr24_field_frame.py
+src/lr24_mavlink_tunnel.py
 scripts/lr24_pairb_dry_run.py
 scripts/run_lr24_pairb_dry_run.sh
+scripts/configure_px4_pairb_telem2.sh
 tests/test_lr24_compact_protocol.py
+tests/test_lr24_mavlink_tunnel.py
 config/lr24/pairb_v1.json
 ```

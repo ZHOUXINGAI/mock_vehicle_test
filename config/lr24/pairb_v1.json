@@ -16,16 +16,36 @@
     "radio_role": "ground",
     "pairb_device": "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0",
     "local_pixhawk_device": "/dev/serial/by-id/usb-Auterion_PX4_FMU_v6C.x_0-if00",
-    "mav_sys_id": 1
+    "mav_sys_id": 1,
+    "mav_component_id": 242,
+    "transport_adapter": "MAVLINK2_TUNNEL_SERIAL"
   },
   "orin2_mini": {
     "role": "executor",
     "radio_role": "vehicle",
     "pairb_device": "PX4_TELEM2",
     "linux_by_id_expected": false,
-    "transport_adapter": "MAVLINK_ENCAPSULATION_PENDING",
+    "transport_adapter": "MAVLINK2_TUNNEL_MAVROS_ROUTER",
     "local_pixhawk_device": "/dev/serial/by-id/usb-Auterion_PX4_FMU_v6C.x_0-if00",
-    "mav_sys_id": 2
+    "mav_sys_id": 2,
+    "mav_component_id": 242,
+    "mavros_topic_prefix": "/pairb_tunnel",
+    "px4_telem2": {
+      "MAV_PROTO_VER": 2,
+      "MAV_1_CONFIG": 102,
+      "MAV_1_MODE": 7,
+      "MAV_1_FORWARD": 1,
+      "MAV_1_FLOW_CTRL": 0,
+      "MAV_1_RADIO_CTL": 0,
+      "MAV_1_RATE": 1200,
+      "SER_TEL2_BAUD": 57600
+    }
+  },
+  "mavlink_tunnel": {
+    "message_id": 385,
+    "payload_type": 0,
+    "max_payload_bytes": 128,
+    "compact_frames_per_message": 1
   },
   "rates": {
     "mini_state_hz": 10.0,
