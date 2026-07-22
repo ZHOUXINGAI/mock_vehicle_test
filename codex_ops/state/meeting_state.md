@@ -90,6 +90,25 @@ Orin2 audit status on 2026-07-22:
 - The repository does not yet contain an executable MiniState sender or a
   PlanCommand receiver with sequence, expiry, timeout, and Abort enforcement.
 
+Superseding transport update from Orin1 at 2026-07-22 22:58 CST:
+
+- The Pair B Pixhawk-compatible adapter is implemented. One complete compact
+  `L2` frame is carried in one unsigned MAVLink 2 `TUNNEL` message, using
+  component 242 in both directions (`1.242 <-> 2.242`).
+- Orin1 opens the Pair B CP2102 directly at 57600. Orin2 attaches
+  `/pairb_tunnel` to the MAVROS Router over Mini Pixhawk USB; Orin2 still has no
+  Pair B Linux serial device.
+- The Mini TELEM2 parameter script is guarded by system/component identity and
+  three explicit no-motion/write confirmations. It never arms, reboots, or
+  sends setpoints.
+- Compact protocol, command gate, TUNNEL codec, ROS conversion, and linked-PTY
+  bidirectional tests pass (19 tests). A no-hardware MAVROS Router test also
+  passed in both directions and learned routes `1.242` and `2.242`.
+- The code remains disconnected from MAVROS setpoints, Arduino, and motors.
+  The next test is a 120-second hardware packet exchange with Carrier sending
+  only zero-speed HOLD and Mini sending simulated state.
+- Canonical procedure: `docs/lr24_pairb_mavlink_tunnel_runbook.md`.
+
 Update from Orin1 at 2026-07-22 20:50 CST:
 
 - Boss reports Pair A, Pair B, and Pair C are all connected and their binding
