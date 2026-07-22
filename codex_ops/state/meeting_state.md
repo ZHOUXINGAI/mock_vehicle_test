@@ -10,6 +10,11 @@ first place both agents read for current decisions.
 
 - Carrier/Orin1 is the onboard docking leader.
 - Mini/Orin2 is the faster fixed-wing mock.
+- Current `/home/seeed` coordination host is Orin2 / Mini, the fixed-wing
+  child-aircraft simulation side. Its peer is Orin1 / Carrier, the quadrotor
+  mother-aircraft simulation side.
+- The immediate purpose of the two-Codex coordination channel is to keep both
+  sides synchronized while bringing the end-to-end mockdocking workflow up.
 - Ground station monitors both vehicles; it is not the primary docking planner.
 - Codex agents coordinate through `mock_vehicle_test/codex_ops` plus each code
   repo's handoff/state docs.
