@@ -51,6 +51,7 @@ class CodexDriverConfig:
     output_schema: Path
     result_dir: Path
     binary: str = "codex"
+    backend: str = "exec"
     timeout_sec: int = 1800
     profile: str = ""
     model: str = ""

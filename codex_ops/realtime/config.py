@@ -51,6 +51,7 @@ def load_agent_config(path: str | Path) -> AgentConfig:
         output_schema=Path(codex_raw["output_schema"]).expanduser(),
         result_dir=Path(codex_raw["result_dir"]).expanduser(),
         binary=str(codex_raw.get("binary", "codex")),
+        backend=str(codex_raw.get("backend", "exec")),
         timeout_sec=int(codex_raw.get("timeout_sec", 1800)),
         profile=str(codex_raw.get("profile", "")),
         model=str(codex_raw.get("model", "")),

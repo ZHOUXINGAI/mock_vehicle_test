@@ -22,6 +22,7 @@
   "codex": {
     "enabled": false,
     "binary": "codex",
+    "backend": "exec",
     "home": "/home/seeed/.codex",
     "session_file": "/home/seeed/mock_vehicle_test/codex_ops/local/orin2-mini/session.json",
     "output_schema": "/home/seeed/mock_vehicle_test/codex_ops/realtime/schemas/codex_agent_output_v1.json",

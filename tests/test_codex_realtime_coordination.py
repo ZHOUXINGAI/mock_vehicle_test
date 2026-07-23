@@ -11,6 +11,10 @@ import unittest
 from pathlib import Path
 
 from codex_ops.realtime.agentd import AgentDaemon
+from codex_ops.realtime.app_server_driver import (
+    AppServerDriver,
+    format_app_server_activity,
+)
 from codex_ops.realtime.codex_driver import (
     CodexDriver,
     CodexDriverConfig,
@@ -195,6 +199,119 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(destination.getvalue(), source.getvalue())
         self.assertIn("Codex：Inspected the repository status.", captured.output[0])
         self.assertEqual(activity[0]["kind"], "message")
+
+
+class AppServerDriverTests(unittest.TestCase):
+    def test_official_stdio_lifecycle_streams_activity_and_structured_result(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repo = root / "repo"
+            repo.mkdir()
+            schema = root / "schema.json"
+            schema.write_text(
+                json.dumps({"type": "object", "additionalProperties": True}),
+                encoding="utf-8",
+            )
+            fake = root / "fake-codex"
+            fake.write_text(
+                """#!/usr/bin/env python3
+import json
+import sys
+
+result = {
+    "status": "completed",
+    "summary": "bridge pass",
+    "details": "read-only",
+    "peer_requests": [],
+    "artifacts": [],
+    "requires_boss": False,
+}
+for line in sys.stdin:
+    message = json.loads(line)
+    method = message.get("method")
+    request_id = message.get("id")
+    if method == "initialize":
+        print(json.dumps({"id": request_id, "result": {"codexHome": "/tmp/codex"}}), flush=True)
+    elif method == "initialized":
+        continue
+    elif method == "thread/start":
+        thread = {"id": "thread_12345", "turns": []}
+        print(json.dumps({"id": request_id, "result": {"thread": thread}}), flush=True)
+        print(json.dumps({"method": "thread/started", "params": {"thread": thread}}), flush=True)
+    elif method == "turn/start":
+        turn = {"id": "turn_12345", "status": "inProgress", "items": [], "error": None}
+        print(json.dumps({"id": request_id, "result": {"turn": turn}}), flush=True)
+        print(json.dumps({"method": "turn/started", "params": {"turn": turn}}), flush=True)
+        item = {
+            "id": "cmd_1",
+            "type": "commandExecution",
+            "command": "git status --short",
+            "status": "inProgress",
+        }
+        print(json.dumps({"method": "item/started", "params": {"item": item}}), flush=True)
+        item["status"] = "completed"
+        item["exitCode"] = 0
+        print(json.dumps({"method": "item/completed", "params": {"item": item}}), flush=True)
+        answer = {"id": "msg_1", "type": "agentMessage", "text": json.dumps(result)}
+        print(json.dumps({"method": "item/completed", "params": {"item": answer}}), flush=True)
+        turn["status"] = "completed"
+        print(json.dumps({"method": "turn/completed", "params": {"turn": turn}}), flush=True)
+""",
+                encoding="utf-8",
+            )
+            fake.chmod(0o755)
+            policy = WorkerPolicy.create(
+                agent_id="orin1-carrier",
+                mode="observe",
+                allowed_roots=[str(repo)],
+                repo_map={"mock_vehicle_test": str(repo)},
+            )
+            config = CodexDriverConfig(
+                agent_id="orin1-carrier",
+                role="test",
+                codex_home=root / ".codex",
+                session_file=root / "session.json",
+                output_schema=schema,
+                result_dir=root / "runs",
+                binary=str(fake),
+                backend="app-server",
+                timeout_sec=5,
+            )
+            driver = AppServerDriver(config, policy)
+            task = TaskEnvelope.create(
+                from_agent="boss",
+                to_agent="orin1-carrier",
+                task_type="analysis",
+                objective="Read-only bridge test.",
+                repo="mock_vehicle_test",
+            )
+            activity: list[dict[str, str]] = []
+
+            result = driver.run(task, repo, activity.append)
+
+            self.assertEqual(result.status, "completed")
+            self.assertEqual(result.summary, "bridge pass")
+            self.assertEqual(result.session_id, "thread_12345")
+            self.assertTrue(any(item["kind"] == "command" for item in activity))
+            self.assertTrue(any(item["kind"] == "message" for item in activity))
+            self.assertTrue(Path(result.event_log).is_file())
+
+    def test_app_server_reasoning_does_not_expose_private_text(self) -> None:
+        activity = format_app_server_activity(
+            {
+                "method": "item/started",
+                "params": {
+                    "item": {
+                        "id": "reason_1",
+                        "type": "reasoning",
+                        "content": ["private chain of thought"],
+                    }
+                },
+            }
+        )
+
+        self.assertIsNotNone(activity)
+        self.assertNotIn("private chain of thought", activity["summary"])  # type: ignore[index]
 
 
 class ConsoleFormattingTests(unittest.TestCase):

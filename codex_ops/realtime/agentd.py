@@ -12,6 +12,7 @@ import signal
 from pathlib import Path
 from typing import Any
 
+from .app_server_driver import AppServerDriver
 from .codex_driver import CodexDriver, CodexRunResult
 from .config import AgentConfig, load_agent_config
 from .console import format_event_for_console
@@ -28,7 +29,12 @@ class AgentDaemon:
     def __init__(self, config: AgentConfig) -> None:
         self.config = config
         self.bus = NatsBus(config.nats, f"codex-agentd-{config.agent_id}")
-        self.driver = CodexDriver(config.driver, config.policy)
+        if config.driver.backend == "app-server":
+            self.driver = AppServerDriver(config.driver, config.policy)
+        elif config.driver.backend == "exec":
+            self.driver = CodexDriver(config.driver, config.policy)
+        else:
+            raise ValueError(f"unsupported Codex backend: {config.driver.backend}")
         self.store = TaskStore(config.state_db)
         self.stop_event = asyncio.Event()
 

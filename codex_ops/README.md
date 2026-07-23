@@ -81,6 +81,27 @@ Automated `codex exec` through agentd is experimental and is not the default
 long-running setup. Do not enable it concurrently with the interactive Codex.
 No mode grants vehicle, serial, MAVLink, actuator, motor, or sudo capability.
 
+## Automatic Visible App-Server Bridge (Pilot)
+
+For direct Ground-to-Orin work without user message relay, the pilot Bridge
+uses the official local `codex app-server` stdio protocol. NATS remains the
+cross-machine transport; app-server is never exposed on a network port.
+
+Only one consumer may run. Stop the installed coordination service with local
+interactive sudo, then start the Bridge in a visible terminal:
+
+```bash
+sudo systemctl stop codex-agentd-orin1-carrier.service
+cd /home/jetson/mock_vehicle_test
+./codex_ops/scripts/launch_visible_app_bridge.sh orin1-carrier
+```
+
+The launcher refuses to start while the system service is active, validates
+the native Codex binary and observe policy, loads the user's login environment,
+and creates a private local Bridge config. It does not alter the installed
+`/etc` config or start any vehicle service. Do not run the native interactive
+Codex against the Bridge thread at the same time.
+
 ## Git Fallback
 
 At the start of every Codex session:
