@@ -102,6 +102,25 @@ and creates a private local Bridge config. It does not alter the installed
 `/etc` config or start any vehicle service. Do not run the native interactive
 Codex against the Bridge thread at the same time.
 
+The Bridge's own stdout is an execution log, not a Codex chat UI. Use the
+read-only chat mirror for an operator-facing transcript:
+
+```bash
+# Ground
+./codex_ops/scripts/watch_ground_chat.sh
+
+# Orin1 terminal
+./codex_ops/scripts/watch_agent_chat.sh orin1-carrier
+
+# Or open the same observer in a new GNOME Terminal on the Orin1 desktop
+./codex_ops/scripts/launch_agent_chat_window.sh orin1-carrier
+```
+
+The mirror renders Ground objectives and Codex replies as chat panels, with
+commands, tools, file changes, analysis status, peer handoffs, and final results
+as readable activity. It subscribes to events only and never consumes a task.
+It is safe to open one mirror on Ground and another on the Orin desktop.
+
 ## Git Fallback
 
 At the start of every Codex session:

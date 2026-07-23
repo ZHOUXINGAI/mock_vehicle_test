@@ -22,7 +22,11 @@ from codex_ops.realtime.codex_driver import (
     mirror_stream,
 )
 from codex_ops.realtime.config import AgentConfig
-from codex_ops.realtime.console import format_codex_activity, format_event_for_console
+from codex_ops.realtime.console import (
+    format_codex_activity,
+    format_event_as_chat,
+    format_event_for_console,
+)
 from codex_ops.realtime.coordctl import next_message_forever
 from codex_ops.realtime.nats_bus import NatsSettings
 from codex_ops.realtime.protocol import TaskEnvelope, TaskSafety
@@ -361,6 +365,37 @@ for line in sys.stdin:
 
 
 class ConsoleFormattingTests(unittest.TestCase):
+    def test_chat_console_renders_ground_and_structured_codex_messages(self) -> None:
+        accepted = format_event_as_chat(
+            {
+                "event_type": "accepted",
+                "agent_id": "orin1-carrier",
+                "from_agent": "boss",
+                "task_id": "12345678-abcd",
+                "created_at": "2026-07-23T13:30:00+08:00",
+                "objective": "Inspect the repository without modifying it.",
+            }
+        )
+        reply = format_event_as_chat(
+            {
+                "event_type": "activity",
+                "activity_kind": "message",
+                "agent_id": "orin1-carrier",
+                "task_id": "12345678-abcd",
+                "created_at": "2026-07-23T13:30:01+08:00",
+                "summary": (
+                    'Codex：{"status":"completed","summary":"Inspection passed",'
+                    '"details":"No files were changed."}'
+                ),
+            }
+        )
+
+        self.assertIn("Ground/Boss → Orin1/Carrier", accepted)
+        self.assertIn("Inspect the repository", accepted)
+        self.assertIn("🤖 Orin1/Carrier", reply)
+        self.assertIn("Inspection passed", reply)
+        self.assertIn("No files were changed.", reply)
+
     def test_command_events_are_readable(self) -> None:
         activity = format_codex_activity(
             json.dumps(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -158,3 +159,101 @@ def format_event_for_console(event: dict[str, Any]) -> str:
         summary = f"任务被拒绝：{summary}"
 
     return f"[{clock}] {marker} {agent}  {summary}{task_suffix}"
+
+
+def _chat_box(title: str, body: str, footer: str = "", width: int = 96) -> str:
+    inner = max(40, width - 4)
+    title_text = f" {title} "
+    top = "╭─" + title_text + "─" * max(1, inner - len(title_text))
+    lines = [top]
+    paragraphs = str(body or "").splitlines() or [""]
+    for paragraph in paragraphs:
+        wrapped = textwrap.wrap(
+            paragraph,
+            width=inner,
+            replace_whitespace=False,
+            drop_whitespace=True,
+        ) or [""]
+        lines.extend(f"│ {line}" for line in wrapped)
+    if footer:
+        lines.append("├" + "─" * (inner + 1))
+        lines.append(f"│ {footer}")
+    lines.append("╰" + "─" * (inner + 1))
+    return "\n".join(lines)
+
+
+def _structured_codex_message(summary: str) -> tuple[str, str]:
+    text = summary.strip()
+    for prefix in ("Codex 回复：", "Codex："):
+        if text.startswith(prefix):
+            text = text[len(prefix) :].strip()
+            break
+    try:
+        payload = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return text, ""
+    if not isinstance(payload, dict):
+        return text, ""
+    heading = str(payload.get("summary") or payload.get("status") or "Codex reply")
+    details = str(payload.get("details") or "")
+    return heading, details
+
+
+def format_event_as_chat(event: dict[str, Any]) -> str:
+    """Render one coordination event as a read-only terminal chat transcript."""
+    event_type = str(event.get("event_type", "event"))
+    agent_id = str(event.get("agent_id", "unknown"))
+    agent = AGENT_LABELS.get(agent_id, agent_id)
+    created_at = str(event.get("created_at", ""))
+    clock = created_at[11:19] if len(created_at) >= 19 else "--:--:--"
+    task_id = str(event.get("task_id") or "")
+    footer = f"{clock}  task={task_id[:8]}" if task_id else clock
+    summary = str(event.get("summary") or "")
+
+    if event_type in {"dispatched", "accepted"}:
+        target_id = str(event.get("to_agent") or agent_id)
+        target = AGENT_LABELS.get(target_id, target_id)
+        objective = str(event.get("objective") or summary)
+        source = AGENT_LABELS.get(str(event.get("from_agent") or "boss"), "Ground/Boss")
+        return _chat_box(f"👤 {source} → {target}", objective, footer)
+
+    if event_type == "activity":
+        kind = str(event.get("activity_kind") or "")
+        if kind == "message":
+            heading, details = _structured_codex_message(summary)
+            body = heading if not details else f"{heading}\n\n{details}"
+            return _chat_box(f"🤖 {agent}", body, footer)
+        marker = {
+            "command": "🔧",
+            "tool": "🧰",
+            "file": "📝",
+            "search": "🔎",
+            "analysis": "💭",
+            "plan": "📋",
+            "session": "🔗",
+            "turn": "•",
+            "error": "❌",
+        }.get(kind, "•")
+        return f"[{clock}] {marker} {agent}  {summary}  task={task_id[:8]}"
+
+    if event_type in {"completed", "blocked", "failed", "rejected"}:
+        marker = {
+            "completed": "✅",
+            "blocked": "⛔",
+            "failed": "❌",
+            "rejected": "🚫",
+        }[event_type]
+        details = str(event.get("details") or "")
+        body = summary if not details else f"{summary}\n\n{details}"
+        return _chat_box(f"{marker} {agent} {event_type}", body, footer)
+
+    if event_type == "peer_dispatched":
+        peer_id = str(event.get("peer_agent") or "")
+        peer = AGENT_LABELS.get(peer_id, peer_id)
+        objective = str(event.get("peer_objective") or summary)
+        return _chat_box(f"📤 {agent} → {peer}", objective, footer)
+
+    if event_type == "online":
+        return f"[{clock}] 🟢 {agent} 在线"
+
+    return format_event_for_console(event)

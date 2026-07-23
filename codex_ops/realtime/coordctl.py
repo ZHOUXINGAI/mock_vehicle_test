@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import load_json
-from .console import format_event_for_console
+from .console import format_event_as_chat, format_event_for_console
 from .nats_bus import NatsBus, NatsSettings
 from .protocol import TaskEnvelope, TaskSafety, event_payload
 
@@ -116,7 +116,12 @@ async def cmd_watch(args: argparse.Namespace) -> int:
         while True:
             message = await next_message_forever(subscription)
             text = message.data.decode("utf-8")
-            if args.pretty:
+            if args.chat:
+                try:
+                    text = format_event_as_chat(json.loads(text))
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    pass
+            elif args.pretty:
                 try:
                     text = format_event_for_console(json.loads(text))
                 except (json.JSONDecodeError, TypeError, ValueError):
@@ -156,6 +161,11 @@ def build_parser() -> argparse.ArgumentParser:
     watch = sub.add_parser("watch", help="Watch live agent events or heartbeats.")
     watch.add_argument("--subject", default="codex.event.>")
     watch.add_argument("--pretty", action="store_true", help="Show readable operator activity.")
+    watch.add_argument(
+        "--chat",
+        action="store_true",
+        help="Show a read-only terminal chat transcript.",
+    )
     watch.set_defaults(func=cmd_watch)
     return parser
 
