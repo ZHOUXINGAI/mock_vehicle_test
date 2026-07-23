@@ -337,6 +337,28 @@ for line in sys.stdin:
         self.assertIsNotNone(activity)
         self.assertNotIn("private chain of thought", activity["summary"])  # type: ignore[index]
 
+    def test_app_server_command_activity_is_human_readable(self) -> None:
+        activity = format_app_server_activity(
+            {
+                "method": "item/started",
+                "params": {
+                    "item": {
+                        "id": "command_1",
+                        "type": "commandExecution",
+                        "command": "git status --short",
+                    }
+                },
+            }
+        )
+
+        self.assertEqual(
+            activity,
+            {
+                "kind": "command",
+                "summary": "运行命令：git status --short",
+            },
+        )
+
 
 class ConsoleFormattingTests(unittest.TestCase):
     def test_command_events_are_readable(self) -> None:
