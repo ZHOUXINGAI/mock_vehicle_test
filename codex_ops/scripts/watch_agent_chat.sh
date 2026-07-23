@@ -16,6 +16,7 @@ if [[ ! -r "$config" ]]; then
   echo "Bridge config is not readable: $config" >&2
   exit 1
 fi
+cd "$repo"
 
 clear
 printf '%s Codex Chat (read-only mirror)\n' "$agent"

@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ops_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+repo="$(cd "$ops_root/.." && pwd)"
 config="${1:-$ops_root/local/boss.json}"
+cd "$repo"
 
 clear
 printf 'Ground ↔ Orin Codex Chat (read-only mirror)\n'
