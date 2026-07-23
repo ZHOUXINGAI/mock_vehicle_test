@@ -44,56 +44,42 @@ Deployment and commissioning:
 docs/codex_cloud_coordination_runbook.md
 ```
 
-## Visible Agent Consoles
+## Visible Interactive Codex (Recommended)
 
-The persistent worker remains a systemd service, while an operator can watch
-the complete task lifecycle in a normal terminal or a VS Code integrated
-terminal. This avoids competing consumers and does not inject external tasks
-into an unrelated interactive Codex chat.
-
-On Ground:
-
-```bash
-cd /home/ai/mock_vehicle_test
-./codex_ops/scripts/watch_ground_events.sh
-```
+Run one normal interactive Codex on each commissioned computer. This is the
+default operator-facing mode: the user sees the native Codex UI, commands,
+edits, and replies directly.
 
 On Orin1:
 
 ```bash
 cd /home/jetson/mock_vehicle_test
-./codex_ops/scripts/watch_agent_console.sh orin1-carrier
+./codex_ops/scripts/launch_visible_codex.sh orin1-carrier
 ```
 
 On Orin2, only after it has been separately commissioned:
 
 ```bash
 cd /home/seeed/mock_vehicle_test
-./codex_ops/scripts/watch_agent_console.sh orin2-mini
+./codex_ops/scripts/launch_visible_codex.sh orin2-mini
 ```
 
-The console renders `accepted`, `progress`, `completed`, `blocked`, and failure
-events as readable work updates. When `codex.enabled=true`, it also renders
-observable `codex exec --json` activity such as commands, file changes, tool
-calls, agent messages, peer handoffs, and results. Raw JSONL is retained only
-under `codex_ops/runs/<agent>/<task-id>/`; private model reasoning is not
-displayed.
+Keep agentd `codex.enabled=false` in this mode. The launcher refuses to create a
+second Codex when background execution is enabled. NATS may report online
+status and notify the operator that Git inbox work exists, but it does not and
+cannot inject a prompt into the running interactive Codex. The operator tells
+the visible Codex to pull Git and process its inbox.
 
-Opening or closing the console does not start or stop the worker. Keep
-`policy.mode=observe` for the first visible Codex gate, and never enable vehicle
-hardware capabilities through this console.
-
-For an explicitly approved Orin1 observe-only Gate B, use the audited wrapper
-with local interactive sudo:
+Ground can retain the readable notification console:
 
 ```bash
-sudo ./codex_ops/scripts/enable_agent_codex_observe.sh orin1-carrier
+cd /home/ai/mock_vehicle_test
+./codex_ops/scripts/watch_ground_events.sh
 ```
 
-The wrapper verifies the absolute native Codex binary recorded during agentd
-installation, refuses an unexpected agent or policy mode, keeps a timestamped
-configuration backup, and restarts only agentd. It does not change any vehicle
-or hardware service.
+Automated `codex exec` through agentd is experimental and is not the default
+long-running setup. Do not enable it concurrently with the interactive Codex.
+No mode grants vehicle, serial, MAVLink, actuator, motor, or sudo capability.
 
 ## Git Fallback
 
