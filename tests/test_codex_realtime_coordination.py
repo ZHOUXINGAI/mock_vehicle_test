@@ -206,6 +206,32 @@ class DriverTests(unittest.TestCase):
 
 
 class AppServerDriverTests(unittest.TestCase):
+    def test_model_refresh_timeout_is_one_nonfatal_notice(self) -> None:
+        line = (
+            "ERROR codex_models_manager::manager: failed to refresh available "
+            "models: timeout waiting for child process to exit\n"
+        )
+        source = io.StringIO(line + line + "ERROR real failure\n")
+        destination = io.StringIO()
+        activity: list[dict[str, str]] = []
+
+        AppServerDriver._stderr_reader(source, destination, activity.append)
+
+        self.assertEqual(destination.getvalue(), line + line + "ERROR real failure\n")
+        self.assertEqual(
+            activity,
+            [
+                {
+                    "kind": "notice",
+                    "summary": "模型列表后台刷新超时；继续使用当前模型，本次任务不受影响",
+                },
+                {
+                    "kind": "error",
+                    "summary": "app-server：ERROR real failure",
+                },
+            ],
+        )
+
     def test_official_stdio_lifecycle_streams_activity_and_structured_result(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -366,10 +392,11 @@ for line in sys.stdin:
 
 class ConsoleFormattingTests(unittest.TestCase):
     def test_chat_console_renders_ground_and_structured_codex_messages(self) -> None:
-        accepted = format_event_as_chat(
+        dispatched = format_event_as_chat(
             {
-                "event_type": "accepted",
-                "agent_id": "orin1-carrier",
+                "event_type": "dispatched",
+                "agent_id": "boss",
+                "to_agent": "orin1-carrier",
                 "from_agent": "boss",
                 "task_id": "12345678-abcd",
                 "created_at": "2026-07-23T13:30:00+08:00",
@@ -389,12 +416,38 @@ class ConsoleFormattingTests(unittest.TestCase):
                 ),
             }
         )
+        accepted = format_event_as_chat(
+            {
+                "event_type": "accepted",
+                "agent_id": "orin1-carrier",
+                "task_id": "12345678-abcd",
+                "created_at": "2026-07-23T13:30:01+08:00",
+            }
+        )
+        completed = format_event_as_chat(
+            {
+                "event_type": "completed",
+                "agent_id": "orin1-carrier",
+                "task_id": "12345678-abcd",
+                "created_at": "2026-07-23T13:30:02+08:00",
+                "summary": "Inspection passed",
+                "details": "No files were changed.",
+            }
+        )
 
-        self.assertIn("Ground/Boss → Orin1/Carrier", accepted)
-        self.assertIn("Inspect the repository", accepted)
+        self.assertIn("Ground/Boss → Orin1/Carrier", dispatched)
+        self.assertIn("Inspect the repository", dispatched)
         self.assertIn("🤖 Orin1/Carrier", reply)
         self.assertIn("Inspection passed", reply)
         self.assertIn("No files were changed.", reply)
+        self.assertEqual(
+            accepted,
+            "[13:30:01] 📥 Orin1/Carrier 已接收任务  task=12345678",
+        )
+        self.assertEqual(
+            completed,
+            "[13:30:02] ✅ Orin1/Carrier 已完成：Inspection passed  task=12345678",
+        )
 
     def test_command_events_are_readable(self) -> None:
         activity = format_codex_activity(

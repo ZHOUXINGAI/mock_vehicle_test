@@ -177,12 +177,28 @@ will deliver it automatically. Do not ask the boss or user to relay normal peer 
         stderr_log: TextIO,
         activity_callback: Callable[[dict[str, str]], None] | None,
     ) -> None:
+        reported_model_refresh_timeout = False
         for line in iter(stream.readline, ""):
             stderr_log.write(line)
             stderr_log.flush()
             text = " ".join(line.split())
             if text:
-                activity = {"kind": "error", "summary": f"app-server：{text[:2000]}"}
+                if "failed to refresh available models: timeout waiting for child process to exit" in text:
+                    if reported_model_refresh_timeout:
+                        continue
+                    reported_model_refresh_timeout = True
+                    activity = {
+                        "kind": "notice",
+                        "summary": (
+                            "模型列表后台刷新超时；继续使用当前模型，"
+                            "本次任务不受影响"
+                        ),
+                    }
+                else:
+                    activity = {
+                        "kind": "error",
+                        "summary": f"app-server：{text[:2000]}",
+                    }
                 LOG.info("%s", activity["summary"])
                 if activity_callback:
                     activity_callback(activity)

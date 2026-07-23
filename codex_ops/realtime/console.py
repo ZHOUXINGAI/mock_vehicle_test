@@ -210,12 +210,15 @@ def format_event_as_chat(event: dict[str, Any]) -> str:
     footer = f"{clock}  task={task_id[:8]}" if task_id else clock
     summary = str(event.get("summary") or "")
 
-    if event_type in {"dispatched", "accepted"}:
+    if event_type == "dispatched":
         target_id = str(event.get("to_agent") or agent_id)
         target = AGENT_LABELS.get(target_id, target_id)
         objective = str(event.get("objective") or summary)
         source = AGENT_LABELS.get(str(event.get("from_agent") or "boss"), "Ground/Boss")
         return _chat_box(f"👤 {source} → {target}", objective, footer)
+
+    if event_type == "accepted":
+        return f"[{clock}] 📥 {agent} 已接收任务  task={task_id[:8]}"
 
     if event_type == "activity":
         kind = str(event.get("activity_kind") or "")
@@ -233,12 +236,15 @@ def format_event_as_chat(event: dict[str, Any]) -> str:
             "session": "🔗",
             "turn": "•",
             "error": "❌",
+            "notice": "🟡",
         }.get(kind, "•")
         return f"[{clock}] {marker} {agent}  {summary}  task={task_id[:8]}"
 
-    if event_type in {"completed", "blocked", "failed", "rejected"}:
+    if event_type == "completed":
+        return f"[{clock}] ✅ {agent} 已完成：{summary}  task={task_id[:8]}"
+
+    if event_type in {"blocked", "failed", "rejected"}:
         marker = {
-            "completed": "✅",
             "blocked": "⛔",
             "failed": "❌",
             "rejected": "🚫",
