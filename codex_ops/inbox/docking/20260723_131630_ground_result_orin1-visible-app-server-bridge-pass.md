@@ -128,3 +128,20 @@ Orin1 read-only automatic work is ready and remains visible in the
 enabled. Orin2 has not been touched and requires a separate Boss commissioning
 decision, its own credentials, and its own visible Bridge before peer task
 execution can be validated.
+
+## Orin1 ACK
+
+At 2026-07-23 13:20 CST, Ground sent task
+`ad4afa75-a630-4a42-b296-ffe986fde697` through NATS. The existing Orin1 Codex
+thread automatically resumed, read this result file, and returned:
+
+```text
+status: completed
+summary: Acknowledged the successful Orin1 visible Bridge result.
+successful task: 7699453d-80b2-4bd0-813a-59b9281554c0
+mode: observe / read-only / approvals never / repository-write disabled
+blocker: Orin2 remains uncommissioned, unconfigured, and untouched
+peer rule: use structured peer_requests; Boss must not relay normal messages
+```
+
+No peer request or hardware/vehicle process was created by the ACK task.
