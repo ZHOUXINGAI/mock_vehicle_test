@@ -24,6 +24,7 @@ from codex_ops.realtime.nats_bus import NatsSettings
 from codex_ops.realtime.protocol import TaskEnvelope, TaskSafety
 from codex_ops.realtime.safety import PolicyRejected, WorkerPolicy
 from codex_ops.realtime.store import TaskStore
+from codex_ops.scripts.set_agent_codex_enabled import update_config
 
 
 class ProtocolTests(unittest.TestCase):
@@ -258,6 +259,57 @@ class ConsoleFormattingTests(unittest.TestCase):
         self.assertIn("Ground/Boss", line)
         self.assertIn("Orin1/Carrier", line)
         self.assertIn("Report transport status without starting Codex.", line)
+
+
+class ConfigToggleTests(unittest.TestCase):
+    def test_enable_requires_expected_agent_and_observe_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "orin1-carrier.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "agent_id": "orin1-carrier",
+                        "policy": {"mode": "observe"},
+                        "codex": {"enabled": False},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            path.chmod(0o600)
+
+            backup = update_config(
+                path,
+                enabled=True,
+                require_agent="orin1-carrier",
+                require_mode="observe",
+            )
+
+            self.assertIsNotNone(backup)
+            self.assertTrue(backup.is_file())  # type: ignore[union-attr]
+            self.assertTrue(json.loads(path.read_text())["codex"]["enabled"])
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_enable_refuses_wrong_agent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "agent.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "agent_id": "orin2-mini",
+                        "policy": {"mode": "observe"},
+                        "codex": {"enabled": False},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "agent mismatch"):
+                update_config(
+                    path,
+                    enabled=True,
+                    require_agent="orin1-carrier",
+                    require_mode="observe",
+                )
 
 
 class FakeBus:
