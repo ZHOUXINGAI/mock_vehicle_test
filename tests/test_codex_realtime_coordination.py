@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import os
 import tempfile
@@ -14,8 +15,11 @@ from codex_ops.realtime.codex_driver import (
     CodexDriver,
     CodexDriverConfig,
     CodexRunResult,
+    mirror_stream,
 )
 from codex_ops.realtime.config import AgentConfig
+from codex_ops.realtime.console import format_codex_activity, format_event_for_console
+from codex_ops.realtime.coordctl import next_message_forever
 from codex_ops.realtime.nats_bus import NatsSettings
 from codex_ops.realtime.protocol import TaskEnvelope, TaskSafety
 from codex_ops.realtime.safety import PolicyRejected, WorkerPolicy
@@ -176,6 +180,85 @@ class DriverTests(unittest.TestCase):
         self.assertNotIn("NATS_PASSWORD", environment)
         self.assertEqual(environment["CODEX_HOME"], "/tmp/codex-home")
 
+    def test_codex_output_is_persisted_and_mirrored_to_journal(self) -> None:
+        source = io.BytesIO(
+            b'{"type":"item.completed","item":{"type":"agent_message",'
+            b'"text":"Inspected the repository status."}}\n'
+        )
+        destination = io.BytesIO()
+        activity: list[dict[str, str]] = []
+
+        with self.assertLogs("codex-agentd.codex", level="INFO") as captured:
+            mirror_stream(source, destination, "stdout", activity.append)
+
+        self.assertEqual(destination.getvalue(), source.getvalue())
+        self.assertIn("Codex：Inspected the repository status.", captured.output[0])
+        self.assertEqual(activity[0]["kind"], "message")
+
+
+class ConsoleFormattingTests(unittest.TestCase):
+    def test_command_events_are_readable(self) -> None:
+        activity = format_codex_activity(
+            json.dumps(
+                {
+                    "type": "item.started",
+                    "item": {
+                        "type": "command_execution",
+                        "command": "/usr/bin/git status --short",
+                    },
+                }
+            )
+        )
+
+        self.assertIsNotNone(activity)
+        self.assertEqual(activity["kind"], "command")  # type: ignore[index]
+        self.assertIn("git status --short", activity["summary"])  # type: ignore[index]
+
+    def test_private_reasoning_text_is_not_exposed(self) -> None:
+        activity = format_codex_activity(
+            json.dumps(
+                {
+                    "type": "item.started",
+                    "item": {"type": "reasoning", "text": "private model reasoning"},
+                }
+            )
+        )
+
+        self.assertIsNotNone(activity)
+        self.assertNotIn("private model reasoning", activity["summary"])  # type: ignore[index]
+
+    def test_accepted_event_includes_concrete_objective(self) -> None:
+        line = format_event_for_console(
+            {
+                "created_at": "2026-07-23T12:34:56+00:00",
+                "agent_id": "orin1-carrier",
+                "event_type": "accepted",
+                "task_id": "12345678-abcd",
+                "summary": "task accepted",
+                "objective": "Inspect Git status and report changed files.",
+            }
+        )
+
+        self.assertIn("Orin1/Carrier", line)
+        self.assertIn("Inspect Git status and report changed files.", line)
+        self.assertIn("task=12345678", line)
+
+    def test_ground_dispatch_names_target_and_objective(self) -> None:
+        line = format_event_for_console(
+            {
+                "created_at": "2026-07-23T12:34:56+00:00",
+                "agent_id": "boss",
+                "event_type": "dispatched",
+                "task_id": "87654321-abcd",
+                "to_agent": "orin1-carrier",
+                "objective": "Report transport status without starting Codex.",
+            }
+        )
+
+        self.assertIn("Ground/Boss", line)
+        self.assertIn("Orin1/Carrier", line)
+        self.assertIn("Report transport status without starting Codex.", line)
+
 
 class FakeBus:
     def __init__(self) -> None:
@@ -201,6 +284,29 @@ class BlockingSubscription:
         except asyncio.CancelledError:
             self.cancelled = True
             raise
+
+
+class TimeoutThenMessageSubscription:
+    def __init__(self, message: object) -> None:
+        self.message = message
+        self.calls = 0
+
+    async def next_msg(self, *, timeout: float) -> object:
+        self.calls += 1
+        if self.calls == 1:
+            raise asyncio.TimeoutError
+        return self.message
+
+
+class WatchTests(unittest.TestCase):
+    def test_idle_timeout_does_not_stop_watcher(self) -> None:
+        expected = object()
+        subscription = TimeoutThenMessageSubscription(expected)
+
+        received = asyncio.run(next_message_forever(subscription))
+
+        self.assertIs(received, expected)
+        self.assertEqual(subscription.calls, 2)
 
 
 class PeerDispatchTests(unittest.TestCase):

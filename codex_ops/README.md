@@ -44,6 +44,45 @@ Deployment and commissioning:
 docs/codex_cloud_coordination_runbook.md
 ```
 
+## Visible Agent Consoles
+
+The persistent worker remains a systemd service, while an operator can watch
+the complete task lifecycle in a normal terminal or a VS Code integrated
+terminal. This avoids competing consumers and does not inject external tasks
+into an unrelated interactive Codex chat.
+
+On Ground:
+
+```bash
+cd /home/ai/mock_vehicle_test
+./codex_ops/scripts/watch_ground_events.sh
+```
+
+On Orin1:
+
+```bash
+cd /home/jetson/mock_vehicle_test
+./codex_ops/scripts/watch_agent_console.sh orin1-carrier
+```
+
+On Orin2, only after it has been separately commissioned:
+
+```bash
+cd /home/seeed/mock_vehicle_test
+./codex_ops/scripts/watch_agent_console.sh orin2-mini
+```
+
+The console renders `accepted`, `progress`, `completed`, `blocked`, and failure
+events as readable work updates. When `codex.enabled=true`, it also renders
+observable `codex exec --json` activity such as commands, file changes, tool
+calls, agent messages, peer handoffs, and results. Raw JSONL is retained only
+under `codex_ops/runs/<agent>/<task-id>/`; private model reasoning is not
+displayed.
+
+Opening or closing the console does not start or stop the worker. Keep
+`policy.mode=observe` for the first visible Codex gate, and never enable vehicle
+hardware capabilities through this console.
+
 ## Git Fallback
 
 At the start of every Codex session:

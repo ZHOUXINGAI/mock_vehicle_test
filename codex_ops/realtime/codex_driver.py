@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import signal
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO, Callable
 
+from .console import format_codex_activity
 from .protocol import TaskEnvelope
 from .safety import WorkerPolicy
 
@@ -18,6 +21,25 @@ from .safety import WorkerPolicy
 _UUID_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
+LOG = logging.getLogger("codex-agentd.codex")
+
+
+def mirror_stream(
+    source: BinaryIO,
+    destination: BinaryIO,
+    label: str,
+    activity_callback: Callable[[dict[str, str]], None] | None = None,
+) -> None:
+    """Persist raw Codex output and mirror meaningful activity to the operator."""
+    for line in iter(source.readline, b""):
+        destination.write(line)
+        destination.flush()
+        text = line.decode("utf-8", errors="replace").rstrip()
+        activity = format_codex_activity(text, label)
+        if activity:
+            LOG.info("%s", activity["summary"])
+            if activity_callback:
+                activity_callback(activity)
 
 
 @dataclass(frozen=True)
@@ -177,7 +199,12 @@ will deliver it automatically. Do not tell the boss to relay a message manually.
                 environment.pop(key, None)
         return environment
 
-    def run(self, task: TaskEnvelope, repo: Path) -> CodexRunResult:
+    def run(
+        self,
+        task: TaskEnvelope,
+        repo: Path,
+        activity_callback: Callable[[dict[str, str]], None] | None = None,
+    ) -> CodexRunResult:
         if not self.config.enabled:
             output = {
                 "status": "completed",
@@ -202,16 +229,31 @@ will deliver it automatically. Do not tell the boss to relay a message manually.
             session_id=session_id,
         )
 
-        with event_log.open("wb") as stdout, stderr_log.open("wb") as stderr:
+        with event_log.open("wb") as stdout_log, stderr_log.open("wb") as stderr_log_file:
             process = subprocess.Popen(
                 command,
                 cwd=repo,
                 env=self._subprocess_env(self.config.codex_home),
                 stdin=subprocess.DEVNULL,
-                stdout=stdout,
-                stderr=stderr,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 start_new_session=True,
+                bufsize=0,
             )
+            assert process.stdout is not None
+            assert process.stderr is not None
+            stdout_thread = threading.Thread(
+                target=mirror_stream,
+                args=(process.stdout, stdout_log, "stdout", activity_callback),
+                daemon=True,
+            )
+            stderr_thread = threading.Thread(
+                target=mirror_stream,
+                args=(process.stderr, stderr_log_file, "stderr", activity_callback),
+                daemon=True,
+            )
+            stdout_thread.start()
+            stderr_thread.start()
             try:
                 exit_code = process.wait(timeout=self.config.timeout_sec)
             except subprocess.TimeoutExpired:
@@ -230,6 +272,9 @@ will deliver it automatically. Do not tell the boss to relay a message manually.
                     str(event_log),
                     str(stderr_log),
                 )
+            finally:
+                stdout_thread.join(timeout=5)
+                stderr_thread.join(timeout=5)
 
         discovered = self.parse_session_id(event_log)
         if discovered:

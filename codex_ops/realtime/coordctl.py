@@ -7,10 +7,12 @@ import argparse
 import asyncio
 import json
 from pathlib import Path
+from typing import Any
 
 from .config import load_json
+from .console import format_event_for_console
 from .nats_bus import NatsBus, NatsSettings
-from .protocol import TaskEnvelope, TaskSafety
+from .protocol import TaskEnvelope, TaskSafety, event_payload
 
 
 def load_bus(path: str) -> NatsBus:
@@ -57,6 +59,19 @@ async def cmd_send(args: argparse.Namespace) -> int:
     if args.wait > 0:
         subscription = await bus.nc.subscribe("codex.event.>")
     try:
+        await bus.publish_event(
+            "boss",
+            event_payload(
+                agent_id="boss",
+                event_type="dispatched",
+                task=task,
+                summary="task dispatched",
+                objective=task.objective,
+                to_agent=task.to_agent,
+                repo=task.repo,
+                task_type=task.task_type,
+            ),
+        )
         await bus.publish_task(f"codex.task.{task.to_agent}", task.to_json(), task.task_id)
         print(json.dumps({"published": True, "task_id": task.task_id, "to": task.to_agent}))
         if not subscription:
@@ -82,14 +97,31 @@ async def cmd_send(args: argparse.Namespace) -> int:
         await bus.close()
 
 
+async def next_message_forever(subscription: Any) -> Any:
+    """Wait across nats-py idle timeouts until a message arrives."""
+    while True:
+        try:
+            return await subscription.next_msg(timeout=1.0)
+        except Exception as exc:
+            if exc.__class__.__name__ == "TimeoutError":
+                continue
+            raise
+
+
 async def cmd_watch(args: argparse.Namespace) -> int:
     bus = load_bus(args.config)
     await bus.connect()
     subscription = await bus.nc.subscribe(args.subject)
     try:
         while True:
-            message = await subscription.next_msg()
-            print(message.data.decode("utf-8"), flush=True)
+            message = await next_message_forever(subscription)
+            text = message.data.decode("utf-8")
+            if args.pretty:
+                try:
+                    text = format_event_for_console(json.loads(text))
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    pass
+            print(text, flush=True)
     finally:
         await bus.close()
 
@@ -123,6 +155,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     watch = sub.add_parser("watch", help="Watch live agent events or heartbeats.")
     watch.add_argument("--subject", default="codex.event.>")
+    watch.add_argument("--pretty", action="store_true", help="Show readable operator activity.")
     watch.set_defaults(func=cmd_watch)
     return parser
 

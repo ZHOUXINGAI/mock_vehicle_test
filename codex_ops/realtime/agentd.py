@@ -14,6 +14,7 @@ from typing import Any
 
 from .codex_driver import CodexDriver, CodexRunResult
 from .config import AgentConfig, load_agent_config
+from .console import format_event_for_console
 from .nats_bus import NatsBus
 from .protocol import AGENT_IDS, TaskEnvelope, TaskSafety, event_payload, utc_now
 from .safety import PolicyRejected
@@ -47,7 +48,7 @@ class AgentDaemon:
             **details,
         )
         await self.bus.publish_event(self.config.agent_id, payload)
-        LOG.info("event=%s task=%s summary=%s", event_type, task.task_id if task else "-", summary)
+        LOG.info("%s", format_event_for_console(json.loads(payload)))
 
     async def heartbeat_loop(self) -> None:
         while not self.stop_event.is_set():
@@ -134,6 +135,7 @@ class AgentDaemon:
                 summary=f"dispatched peer task to {target}",
                 peer_task_id=peer_task.task_id,
                 peer_agent=target,
+                peer_objective=peer_task.objective,
             )
         return dispatched
 
@@ -162,10 +164,38 @@ class AgentDaemon:
             await message.ack()
             return
 
-        await self.emit("accepted", task=task, summary="task accepted", attempts=attempts)
+        await self.emit(
+            "accepted",
+            task=task,
+            summary="task accepted",
+            attempts=attempts,
+            objective=task.objective,
+            from_agent=task.from_agent,
+            repo=task.repo,
+            task_type=task.task_type,
+        )
         keepalive = asyncio.create_task(self._keep_task_alive(message, task))
+        loop = asyncio.get_running_loop()
+        activity_queue: asyncio.Queue[dict[str, str] | None] = asyncio.Queue()
+
+        def publish_activity(activity: dict[str, str]) -> None:
+            loop.call_soon_threadsafe(activity_queue.put_nowait, activity)
+
+        async def activity_pump() -> None:
+            while True:
+                activity = await activity_queue.get()
+                if activity is None:
+                    return
+                await self.emit(
+                    "activity",
+                    task=task,
+                    summary=activity["summary"],
+                    activity_kind=activity["kind"],
+                )
+
+        activity_pump_task = asyncio.create_task(activity_pump())
         try:
-            result = await asyncio.to_thread(self.driver.run, task, repo)
+            result = await asyncio.to_thread(self.driver.run, task, repo, publish_activity)
         except Exception as exc:
             LOG.exception("Codex driver failed")
             self.store.finish(task.task_id, "failed", str(exc))
@@ -178,6 +208,10 @@ class AgentDaemon:
                 await keepalive
             except asyncio.CancelledError:
                 pass
+            activity_queue.put_nowait(None)
+            activity_result = await asyncio.gather(activity_pump_task, return_exceptions=True)
+            if activity_result and isinstance(activity_result[0], Exception):
+                LOG.error("activity publisher failed: %s", activity_result[0])
 
         peer_task_ids = await self._dispatch_peer_requests(task, result)
         self.store.finish(task.task_id, result.status, result.summary)
