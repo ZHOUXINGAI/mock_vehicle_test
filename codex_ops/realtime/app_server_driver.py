@@ -344,14 +344,14 @@ will deliver it automatically. Do not ask the boss or user to relay normal peer 
                         "threadId": thread_id,
                         "cwd": str(repo),
                         "approvalPolicy": "never",
-                        "sandbox": "readOnly",
+                        "sandbox": "read-only",
                     }
                 else:
                     method = "thread/start"
                     params = {
                         "cwd": str(repo),
                         "approvalPolicy": "never",
-                        "sandbox": "readOnly",
+                        "sandbox": "read-only",
                         "serviceName": "mock_vehicle_codex_bridge",
                     }
                     if self.config.model:
@@ -387,7 +387,7 @@ will deliver it automatically. Do not ask the boss or user to relay normal peer 
                         "input": [{"type": "text", "text": self.task_prompt(task)}],
                         "cwd": str(repo),
                         "approvalPolicy": "never",
-                        "sandboxPolicy": {"type": "readOnly"},
+                        "sandboxPolicy": {"type": "read-only"},
                         "outputSchema": output_schema,
                     },
                     deadline=deadline,

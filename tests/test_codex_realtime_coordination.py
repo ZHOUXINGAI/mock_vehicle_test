@@ -235,10 +235,12 @@ for line in sys.stdin:
     elif method == "initialized":
         continue
     elif method == "thread/start":
+        assert message["params"]["sandbox"] == "read-only", message
         thread = {"id": "thread_12345", "turns": []}
         print(json.dumps({"id": request_id, "result": {"thread": thread}}), flush=True)
         print(json.dumps({"method": "thread/started", "params": {"thread": thread}}), flush=True)
     elif method == "turn/start":
+        assert message["params"]["sandboxPolicy"]["type"] == "read-only", message
         turn = {"id": "turn_12345", "status": "inProgress", "items": [], "error": None}
         print(json.dumps({"id": request_id, "result": {"turn": turn}}), flush=True)
         print(json.dumps({"method": "turn/started", "params": {"turn": turn}}), flush=True)
