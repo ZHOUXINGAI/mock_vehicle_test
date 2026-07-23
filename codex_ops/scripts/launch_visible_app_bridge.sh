@@ -37,18 +37,32 @@ if systemctl is-active --quiet "$service"; then
   exit 1
 fi
 
-interactive_pids="$(pgrep -u "$expected_user" -f '/codex( |$)' || true)"
+repo="$home/mock_vehicle_test"
+local_dir="$repo/codex_ops/local/$agent"
+mkdir -p "$local_dir"
+
+lock_file="$local_dir/visible-app-bridge.lock"
+exec {bridge_lock_fd}>"$lock_file"
+if ! flock -n "$bridge_lock_fd"; then
+  echo "refusing a second visible Bridge: lock is held at $lock_file" >&2
+  exit 1
+fi
+
+# VS Code uses its own Codex app-server and may stay alive while this visible
+# bridge runs. It is not a NATS task consumer. Refuse only native interactive
+# or exec-style Codex processes; the flock above prevents duplicate Bridges.
+interactive_pids="$(
+  ps -u "$expected_user" -o pid=,args= |
+    awk '$0 ~ /\/codex( |$)/ && $0 !~ /(^| )app-server( |$)/ {print $1}'
+)"
 if [[ -n "$interactive_pids" ]]; then
   echo "refusing concurrent native Codex process(es): $interactive_pids" >&2
   echo "exit the interactive Codex before launching this Bridge" >&2
   exit 1
 fi
 
-repo="$home/mock_vehicle_test"
 installed_config="/etc/codex-agentd/$agent.json"
-local_dir="$repo/codex_ops/local/$agent"
 bridge_config="$local_dir/visible-app-bridge.json"
-mkdir -p "$local_dir"
 
 python3 - "$installed_config" "$bridge_config" "$agent" "$repo" <<'PY'
 import json

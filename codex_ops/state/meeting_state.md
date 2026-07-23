@@ -176,6 +176,24 @@ lineage and committed Git artifacts.
 If the cloud broker is unavailable, use the Git inbox/event flow above as the
 fallback and reconcile it after connectivity returns.
 
+## Windows Ground Command Boundary
+
+Persistent operational rule learned on 2026-07-23:
+
+- Do not pass a compound Bash or SSH program containing semicolons, pipes,
+  spaces that depend on nested quotes, or shell redirections directly through
+  PowerShell as trailing arguments to `wt.exe` or `wsl.exe ... bash -lc`.
+- Windows Terminal can reinterpret those tokens as separate terminal actions,
+  opening multiple failed tabs with `0x80070002`. The PowerShell-to-`wsl.exe`
+  native argument boundary can also strip nested quotes, truncate a command or
+  commit message, and silently skip intended trailing operations.
+- For a visible terminal, launch one executable with simple arguments. Put any
+  compound logic in a script inside WSL and invoke that script as one argument.
+- For repeated secure Orin operations, establish one simple OpenSSH
+  `ControlMaster` connection interactively, then reuse its Unix control socket.
+  Never place an SSH or sudo password in a command, environment variable,
+  script, log, Git, or memory.
+
 ## Cloud Coordination Validation
 
 Local no-hardware end-to-end validation passed on 2026-07-23:
