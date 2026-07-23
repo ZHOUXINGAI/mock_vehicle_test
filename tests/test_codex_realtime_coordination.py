@@ -240,7 +240,7 @@ for line in sys.stdin:
         print(json.dumps({"id": request_id, "result": {"thread": thread}}), flush=True)
         print(json.dumps({"method": "thread/started", "params": {"thread": thread}}), flush=True)
     elif method == "turn/start":
-        assert message["params"]["sandboxPolicy"]["type"] == "read-only", message
+        assert message["params"]["sandboxPolicy"]["type"] == "readOnly", message
         turn = {"id": "turn_12345", "status": "inProgress", "items": [], "error": None}
         print(json.dumps({"id": request_id, "result": {"turn": turn}}), flush=True)
         print(json.dumps({"method": "turn/started", "params": {"turn": turn}}), flush=True)

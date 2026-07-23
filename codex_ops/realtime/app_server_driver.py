@@ -387,7 +387,7 @@ will deliver it automatically. Do not ask the boss or user to relay normal peer 
                         "input": [{"type": "text", "text": self.task_prompt(task)}],
                         "cwd": str(repo),
                         "approvalPolicy": "never",
-                        "sandboxPolicy": {"type": "read-only"},
+                        "sandboxPolicy": {"type": "readOnly"},
                         "outputSchema": output_schema,
                     },
                     deadline=deadline,
