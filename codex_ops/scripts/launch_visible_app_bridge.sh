@@ -37,6 +37,13 @@ if systemctl is-active --quiet "$service"; then
   exit 1
 fi
 
+interactive_pids="$(pgrep -u "$expected_user" -f '/codex( |$)' || true)"
+if [[ -n "$interactive_pids" ]]; then
+  echo "refusing concurrent native Codex process(es): $interactive_pids" >&2
+  echo "exit the interactive Codex before launching this Bridge" >&2
+  exit 1
+fi
+
 repo="$home/mock_vehicle_test"
 installed_config="/etc/codex-agentd/$agent.json"
 local_dir="$repo/codex_ops/local/$agent"
