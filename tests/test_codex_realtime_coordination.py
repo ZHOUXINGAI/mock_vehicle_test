@@ -234,6 +234,14 @@ for line in sys.stdin:
         print(json.dumps({"id": request_id, "result": {"codexHome": "/tmp/codex"}}), flush=True)
     elif method == "initialized":
         continue
+    elif method == "thread/resume":
+        print(json.dumps({
+            "id": request_id,
+            "error": {
+                "code": -32600,
+                "message": "no rollout found for thread id stale_thread_123",
+            },
+        }), flush=True)
     elif method == "thread/start":
         assert message["params"]["sandbox"] == "read-only", message
         thread = {"id": "thread_12345", "turns": []}
@@ -268,11 +276,21 @@ for line in sys.stdin:
                 allowed_roots=[str(repo)],
                 repo_map={"mock_vehicle_test": str(repo)},
             )
+            session_file = root / "session.json"
+            session_file.write_text(
+                json.dumps(
+                    {
+                        "agent_id": "orin1-carrier",
+                        "thread_id": "stale_thread_123",
+                    }
+                ),
+                encoding="utf-8",
+            )
             config = CodexDriverConfig(
                 agent_id="orin1-carrier",
                 role="test",
                 codex_home=root / ".codex",
-                session_file=root / "session.json",
+                session_file=session_file,
                 output_schema=schema,
                 result_dir=root / "runs",
                 binary=str(fake),
@@ -294,6 +312,10 @@ for line in sys.stdin:
             self.assertEqual(result.status, "completed")
             self.assertEqual(result.summary, "bridge pass")
             self.assertEqual(result.session_id, "thread_12345")
+            self.assertEqual(driver.load_thread_id(), "thread_12345")
+            self.assertTrue(
+                any("stale" in item["summary"].lower() for item in activity)
+            )
             self.assertTrue(any(item["kind"] == "command" for item in activity))
             self.assertTrue(any(item["kind"] == "message" for item in activity))
             self.assertTrue(Path(result.event_log).is_file())

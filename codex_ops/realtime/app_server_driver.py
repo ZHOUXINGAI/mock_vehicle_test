@@ -356,16 +356,51 @@ will deliver it automatically. Do not ask the boss or user to relay normal peer 
                     }
                     if self.config.model:
                         params["model"] = self.config.model
-                thread_result = self._wait_after_send(
-                    process=process,
-                    messages=message_queue,
-                    request_id=request_id,
-                    method=method,
-                    params=params,
-                    deadline=deadline,
-                    activity_callback=activity_callback,
-                    final_messages=final_messages,
-                )
+                try:
+                    thread_result = self._wait_after_send(
+                        process=process,
+                        messages=message_queue,
+                        request_id=request_id,
+                        method=method,
+                        params=params,
+                        deadline=deadline,
+                        activity_callback=activity_callback,
+                        final_messages=final_messages,
+                    )
+                except RuntimeError as exc:
+                    missing_rollout = "no rollout found for thread id" in str(exc).lower()
+                    if not thread_id or not missing_rollout:
+                        raise
+                    LOG.warning(
+                        "saved app-server thread is not resumable; starting a new thread"
+                    )
+                    if activity_callback is not None:
+                        activity_callback(
+                            {
+                                "kind": "session",
+                                "summary": "Saved Codex session was stale; starting a new thread",
+                            }
+                        )
+                    self.config.session_file.unlink(missing_ok=True)
+                    request_id += 1
+                    params = {
+                        "cwd": str(repo),
+                        "approvalPolicy": "never",
+                        "sandbox": "read-only",
+                        "serviceName": "mock_vehicle_codex_bridge",
+                    }
+                    if self.config.model:
+                        params["model"] = self.config.model
+                    thread_result = self._wait_after_send(
+                        process=process,
+                        messages=message_queue,
+                        request_id=request_id,
+                        method="thread/start",
+                        params=params,
+                        deadline=deadline,
+                        activity_callback=activity_callback,
+                        final_messages=final_messages,
+                    )
                 thread = thread_result.get("thread")
                 if not isinstance(thread, dict) or not thread.get("id"):
                     raise RuntimeError("app-server did not return a thread id")
