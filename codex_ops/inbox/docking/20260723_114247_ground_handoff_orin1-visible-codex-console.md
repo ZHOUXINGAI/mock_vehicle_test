@@ -32,13 +32,10 @@ sudo 密码写入脚本、Git、memory 或日志。
 要看到真实 Codex 工作而不只是 transport ACK，需要在 Orin1 本机明确进入
 Gate B：保留 `policy.mode=observe`，把
 `/etc/codex-agentd/orin1-carrier.json` 中 `codex.enabled` 改为 `true`，
-推荐用带身份和模式校验、自动备份的脚本，然后交互式执行：
+推荐用带 Codex 路径、身份、模式校验和自动备份的 wrapper，然后交互式执行：
 
 ```bash
-sudo python3 codex_ops/scripts/set_agent_codex_enabled.py \
-  --config /etc/codex-agentd/orin1-carrier.json \
-  --enabled true --require-agent orin1-carrier --require-mode observe
-sudo systemctl restart codex-agentd-orin1-carrier.service
+sudo ./codex_ops/scripts/enable_agent_codex_observe.sh orin1-carrier
 ```
 
 此后 Ground 发来的只读任务会启动独立的 automation Codex，并在上述 console

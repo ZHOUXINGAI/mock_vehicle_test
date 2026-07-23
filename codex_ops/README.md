@@ -83,18 +83,17 @@ Opening or closing the console does not start or stop the worker. Keep
 `policy.mode=observe` for the first visible Codex gate, and never enable vehicle
 hardware capabilities through this console.
 
-For an explicitly approved Orin1 observe-only Gate B, use the audited helper
-with local interactive sudo, then restart only the coordination worker:
+For an explicitly approved Orin1 observe-only Gate B, use the audited wrapper
+with local interactive sudo:
 
 ```bash
-sudo python3 codex_ops/scripts/set_agent_codex_enabled.py \
-  --config /etc/codex-agentd/orin1-carrier.json \
-  --enabled true --require-agent orin1-carrier --require-mode observe
-sudo systemctl restart codex-agentd-orin1-carrier.service
+sudo ./codex_ops/scripts/enable_agent_codex_observe.sh orin1-carrier
 ```
 
-The helper refuses an unexpected agent or policy mode and keeps a timestamped
-configuration backup. It does not change any vehicle or hardware service.
+The wrapper verifies the absolute native Codex binary recorded during agentd
+installation, refuses an unexpected agent or policy mode, keeps a timestamped
+configuration backup, and restarts only agentd. It does not change any vehicle
+or hardware service.
 
 ## Git Fallback
 
