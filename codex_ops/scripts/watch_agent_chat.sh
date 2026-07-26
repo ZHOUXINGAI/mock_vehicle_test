@@ -11,11 +11,7 @@ case "$agent" in
 esac
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-config="$repo/codex_ops/local/$agent/visible-app-bridge.json"
-if [[ ! -r "$config" ]]; then
-  echo "Bridge config is not readable: $config" >&2
-  exit 1
-fi
+event_log="$repo/codex_ops/local/$agent/live-events.jsonl"
 cd "$repo"
 
 clear
@@ -23,5 +19,6 @@ printf '%s Codex Chat (read-only mirror)\n' "$agent"
 printf 'Ground tasks, Codex replies, commands and peer handoffs appear here.\n'
 printf 'The Bridge remains the only task consumer. Ctrl-C only closes this mirror.\n\n'
 
-exec "$repo/codex_ops/scripts/coordctl.sh" \
-  --config "$config" watch --subject "codex.event.$agent" --chat
+exec "$repo/codex_ops/local/venv/bin/python" \
+  -m codex_ops.realtime.local_chat_watch \
+  --file "$event_log"

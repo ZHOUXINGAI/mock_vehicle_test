@@ -36,6 +36,10 @@ class AgentDaemon:
         else:
             raise ValueError(f"unsupported Codex backend: {config.driver.backend}")
         self.store = TaskStore(config.state_db)
+        self.local_event_log = config.state_db.with_name("live-events.jsonl")
+        self.local_event_log.parent.mkdir(parents=True, exist_ok=True)
+        self.local_event_log.touch(mode=0o600, exist_ok=True)
+        self.local_event_log.chmod(0o600)
         self.stop_event = asyncio.Event()
 
     async def emit(
@@ -53,6 +57,11 @@ class AgentDaemon:
             summary=summary,
             **details,
         )
+        try:
+            with self.local_event_log.open("a", encoding="utf-8") as local_log:
+                local_log.write(payload.decode("utf-8") + "\n")
+        except OSError:
+            LOG.exception("local event mirror write failed")
         await self.bus.publish_event(self.config.agent_id, payload)
         LOG.info("%s", format_event_for_console(json.loads(payload)))
 

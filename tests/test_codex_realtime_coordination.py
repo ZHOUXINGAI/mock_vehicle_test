@@ -27,6 +27,7 @@ from codex_ops.realtime.console import (
     format_event_as_chat,
     format_event_for_console,
 )
+from codex_ops.realtime.local_chat_watch import render_event_line
 from codex_ops.realtime.coordctl import next_message_forever
 from codex_ops.realtime.nats_bus import NatsSettings
 from codex_ops.realtime.protocol import TaskEnvelope, TaskSafety
@@ -391,6 +392,23 @@ for line in sys.stdin:
 
 
 class ConsoleFormattingTests(unittest.TestCase):
+    def test_local_chat_mirror_renders_event_jsonl(self) -> None:
+        rendered = render_event_line(
+            json.dumps(
+                {
+                    "event_type": "accepted",
+                    "agent_id": "orin1-carrier",
+                    "task_id": "12345678-abcd",
+                    "created_at": "2026-07-23T13:30:01+08:00",
+                }
+            )
+        )
+
+        self.assertEqual(
+            rendered,
+            "[13:30:01] 📥 Orin1/Carrier 已接收任务  task=12345678",
+        )
+
     def test_chat_console_renders_ground_and_structured_codex_messages(self) -> None:
         dispatched = format_event_as_chat(
             {

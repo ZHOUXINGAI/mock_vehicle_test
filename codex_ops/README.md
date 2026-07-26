@@ -118,8 +118,11 @@ read-only chat mirror for an operator-facing transcript:
 
 The mirror renders Ground objectives and Codex replies as chat panels, with
 commands, tools, file changes, analysis status, peer handoffs, and final results
-as readable activity. It subscribes to events only and never consumes a task.
-It is safe to open one mirror on Ground and another on the Orin desktop.
+as readable activity. Ground subscribes to NATS events. The Orin-local mirror
+follows the worker's private mode-0600 `live-events.jsonl`, because the
+least-privilege agent certificate publishes its own events but is intentionally
+not allowed to subscribe to them. Neither mirror consumes a task. It is safe to
+open one mirror on Ground and another on the Orin desktop.
 
 ## Git Fallback
 
