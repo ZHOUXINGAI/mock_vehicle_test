@@ -102,6 +102,19 @@ and creates a private local Bridge config. It does not alter the installed
 `/etc` config or start any vehicle service. Do not run the native interactive
 Codex against the Bridge thread at the same time.
 
+To continue a specific existing Orin Codex conversation, pin the Bridge to its
+session ID before dispatching the next task. The command verifies that exactly
+one local rollout exists, preserves the previous Bridge pointer as a timestamped
+backup, and never edits the rollout:
+
+```bash
+python3 codex_ops/scripts/pin_agent_codex_session.py \
+  --session-file codex_ops/local/orin1-carrier/app-server-session.json \
+  --codex-home /home/jetson/.codex \
+  --agent-id orin1-carrier \
+  --session-id 019e3b9d-8417-76d2-bf88-4ec59aba48c4
+```
+
 The Bridge's own stdout is an execution log, not a Codex chat UI. Use the
 read-only chat mirror for an operator-facing transcript:
 

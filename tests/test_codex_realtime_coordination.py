@@ -33,6 +33,7 @@ from codex_ops.realtime.nats_bus import NatsSettings
 from codex_ops.realtime.protocol import TaskEnvelope, TaskSafety
 from codex_ops.realtime.safety import PolicyRejected, WorkerPolicy
 from codex_ops.realtime.store import TaskStore
+from codex_ops.scripts.pin_agent_codex_session import pin_session
 from codex_ops.scripts.set_agent_codex_enabled import update_config
 
 
@@ -578,6 +579,61 @@ class ConfigToggleTests(unittest.TestCase):
                     enabled=True,
                     require_agent="orin1-carrier",
                     require_mode="observe",
+                )
+
+
+class SessionPinTests(unittest.TestCase):
+    def test_pin_existing_rollout_and_back_up_previous_pointer(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            codex_home = root / ".codex"
+            rollout = (
+                codex_home
+                / "sessions"
+                / "2026"
+                / "05"
+                / "rollout-019e3b9d-target.jsonl"
+            )
+            rollout.parent.mkdir(parents=True)
+            rollout.write_text("{}\n", encoding="utf-8")
+            session_file = root / "app-server-session.json"
+            session_file.write_text(
+                json.dumps(
+                    {"agent_id": "orin1-carrier", "thread_id": "019f8d64-old"}
+                ),
+                encoding="utf-8",
+            )
+
+            verified, backup = pin_session(
+                session_file,
+                codex_home=codex_home,
+                agent_id="orin1-carrier",
+                session_id="019e3b9d-target",
+            )
+
+            self.assertEqual(verified, rollout.resolve())
+            self.assertIsNotNone(backup)
+            self.assertTrue(backup.is_file())  # type: ignore[union-attr]
+            self.assertEqual(
+                json.loads(session_file.read_text(encoding="utf-8")),
+                {
+                    "agent_id": "orin1-carrier",
+                    "thread_id": "019e3b9d-target",
+                },
+            )
+            self.assertEqual(session_file.stat().st_mode & 0o777, 0o600)
+
+    def test_pin_refuses_missing_rollout(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            codex_home = root / ".codex"
+            codex_home.mkdir()
+            with self.assertRaisesRegex(RuntimeError, "no rollout found"):
+                pin_session(
+                    root / "app-server-session.json",
+                    codex_home=codex_home,
+                    agent_id="orin1-carrier",
+                    session_id="019e3b9d-missing",
                 )
 
 
