@@ -23,6 +23,7 @@ from lr24_compact_protocol import (
     PlanCommand,
     PlanFlag,
     Role,
+    corridor_plan_timing_error,
     sequence_is_newer,
 )
 
@@ -171,6 +172,9 @@ class MiniCommandGate:
             return "duplicate_or_old_plan_seq"
         if not (plan.flags & int(PlanFlag.CORRIDOR_VALID)):
             return "corridor_not_valid"
+        timing_error = corridor_plan_timing_error(plan)
+        if timing_error is not None:
+            return timing_error
         if self.active_origin is None:
             return "plan_without_field_origin"
         if plan.origin_id != self.active_origin.origin_id:

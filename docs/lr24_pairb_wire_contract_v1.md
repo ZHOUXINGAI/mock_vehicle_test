@@ -4,6 +4,8 @@ Status: implementation contract for Orin1/Carrier and Orin2/Mini.
 
 This is the compact, point-to-point control-plane protocol on Pair B. Pair A
 and Pair C remain MAVLink/QGC telemetry links and must not carry these frames.
+The frame envelope remains version 1. `CORRIDOR_PLAN` uses payload schema 2
+starting with the 59-byte layout below.
 
 ## Physical Link
 
@@ -213,9 +215,10 @@ Carrier freshness is based on local receive time. Initial policy is stale at
 and matching origin. The readiness bits are reported separately and do not
 authorize motion by themselves.
 
-### CORRIDOR_PLAN, 42-byte payload, 49-byte frame
+### CORRIDOR_PLAN schema 2, 59-byte payload, 66-byte frame
 
 ```text
+uint8  plan_schema_version     required value = 2
 uint16 plan_id
 uint32 seq
 uint32 timestamp_ms
@@ -233,6 +236,13 @@ uint16 carrier_max_speed_cm_s
 uint16 target_front_gap_cm
 uint16 flags
 uint16 origin_id
+uint32 required_validity_ms
+uint16 post_tangent_reserve_ms
+uint16 terminal_completion_budget_ms
+uint16 completion_hold_ms
+uint16 plan_timing_guard_ms
+uint16 command_ttl_ms
+uint16 local_command_watchdog_ms
 ```
 
 Plan flags:
@@ -242,9 +252,48 @@ bit 0  CORRIDOR_VALID
 bit 1  ONE_ORBIT_COMPLETE
 ```
 
-The Mini requires `CORRIDOR_VALID`, a matching nonzero origin ID, a unit
-tangent vector within two percent, a new sequence, and a bounded TTL. The
-first full docking run also requires `ONE_ORBIT_COMPLETE` before tangent exit.
+The payload schema version is independent of the global LR24 frame envelope
+version. The Mini rejects every payload schema other than 2.
+
+The immutable plan timing contract is:
+
+```text
+post_tangent_reserve_ms =
+    terminal_completion_budget_ms
+  + completion_hold_ms
+  + max(command_ttl_ms, local_command_watchdog_ms)
+  + plan_timing_guard_ms
+
+required_validity_ms =
+    ceil_to_100ms(mini_arrival_delay_ms + post_tangent_reserve_ms)
+
+sender_validity_ms =
+    uint32(valid_until_ms - timestamp_ms)
+```
+
+`sender_validity_ms` must be at least `required_validity_ms`. The arrival
+delay, required validity, reserve, terminal budget, completion hold, command
+TTL, and watchdog must all be nonzero. Only `plan_timing_guard_ms` may be
+zero. The sender rejects values outside their declared uint8/uint16/uint32
+wire ranges and rejects inconsistent timing equations; it never clamps,
+wraps, or silently extends an immutable plan. The Mini independently repeats
+these checks and fails closed.
+
+The current default timing values are:
+
+```text
+terminal_completion_budget_ms = 2000
+completion_hold_ms             = 500
+plan_timing_guard_ms           = 100
+command_ttl_ms                 = 500
+local_command_watchdog_ms      = 750
+post_tangent_reserve_ms        = 3350
+```
+
+The Mini also requires `CORRIDOR_VALID`, a matching nonzero origin ID, a unit
+tangent vector within two percent, a new sequence, and a bounded sender TTL.
+The first full docking run also requires `ONE_ORBIT_COMPLETE` before tangent
+exit.
 
 ### PLAN_COMMAND, 30-byte payload, 37-byte frame
 
@@ -297,7 +346,7 @@ zero truncation:
 ```text
 MiniState:       49 bytes x 10 Hz = 490 B/s
 PlanCommand:     54 bytes x  5 Hz = 270 B/s
-CorridorPlan:    66 bytes x 0.2 Hz, plus event send
+CorridorPlan:    83 bytes x 0.2 Hz, plus event send
 FieldOrigin:     48 bytes x 0.2 Hz during setup
 ABORT:           38 bytes x 10 Hz for one second
 ```
@@ -316,6 +365,12 @@ The first two layers are implemented and testable with no motion. The executor
 must remain disabled by default and requires local, explicit motion approval.
 The radio binding LED only proves RF pairing; it does not prove packet loss,
 latency, common coordinates, watchdog behavior, or motor-stop behavior.
+
+Pair B carries only compact runtime state, plans, commands, origins, aborts,
+and link probes. It never carries files, Git repositories or patches, logs,
+Codex traffic, or NATS traffic. GitHub/SSH remain the code and file deployment
+path. NATS is Codex coordination only and is never part of the vehicle control
+loop.
 
 Implementation files:
 

@@ -37,7 +37,10 @@ from lr24_compact_protocol import (  # noqa: E402
     Phase,
     PlanCommand,
     PlanFlag,
+    PLAN_SCHEMA_VERSION,
     Role,
+    corridor_plan_post_tangent_reserve_ms,
+    corridor_plan_required_validity_ms,
     describe_frame,
     encode_frame,
     frame_sizes,
@@ -131,7 +134,19 @@ def simulated_mini_state(args: argparse.Namespace, seq: int, period: float) -> M
 
 def make_corridor_plan(args: argparse.Namespace, seq: int) -> CorridorPlanCompact:
     stamp = monotonic_ms()
+    reserve_ms = corridor_plan_post_tangent_reserve_ms(
+        args.terminal_completion_budget_ms,
+        args.completion_hold_ms,
+        args.valid_for_ms,
+        args.local_command_watchdog_ms,
+        args.plan_timing_guard_ms,
+    )
+    required_validity_ms = corridor_plan_required_validity_ms(
+        args.mini_arrival_delay_ms,
+        reserve_ms,
+    )
     return CorridorPlanCompact(
+        plan_schema_version=PLAN_SCHEMA_VERSION,
         plan_id=args.plan_id,
         seq=seq,
         timestamp_ms=stamp,
@@ -147,6 +162,13 @@ def make_corridor_plan(args: argparse.Namespace, seq: int) -> CorridorPlanCompac
         mini_speed_mps=args.mini_speed_mps,
         carrier_max_speed_mps=args.carrier_max_speed_mps,
         target_front_gap_m=args.target_front_gap_m,
+        required_validity_ms=required_validity_ms,
+        post_tangent_reserve_ms=reserve_ms,
+        terminal_completion_budget_ms=args.terminal_completion_budget_ms,
+        completion_hold_ms=args.completion_hold_ms,
+        plan_timing_guard_ms=args.plan_timing_guard_ms,
+        command_ttl_ms=args.valid_for_ms,
+        local_command_watchdog_ms=args.local_command_watchdog_ms,
         flags=int(PlanFlag.CORRIDOR_VALID | PlanFlag.ONE_ORBIT_COMPLETE),
         origin_id=args.origin_id,
     )
@@ -581,7 +603,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--allow-nonhold-command", action="store_true")
     p.add_argument("--send-corridor-plan", action="store_true")
     p.add_argument("--corridor-plan-rate-hz", type=float, default=0.2)
-    p.add_argument("--corridor-plan-valid-for-ms", type=int, default=30000)
+    p.add_argument("--corridor-plan-valid-for-ms", type=int, default=32000)
     p.add_argument("--rendezvous-x-m", type=float, default=-1.5526)
     p.add_argument("--rendezvous-y-m", type=float, default=-4.2237)
     p.add_argument("--tangent-dir-x", type=float, default=0.9386)
@@ -593,6 +615,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--mini-speed-mps", type=float, default=0.9)
     p.add_argument("--carrier-max-speed-mps", type=float, default=0.7)
     p.add_argument("--target-front-gap-m", type=float, default=0.35)
+    p.add_argument("--terminal-completion-budget-ms", type=int, default=2000)
+    p.add_argument("--completion-hold-ms", type=int, default=500)
+    p.add_argument("--plan-timing-guard-ms", type=int, default=100)
+    p.add_argument("--local-command-watchdog-ms", type=int, default=750)
     p.set_defaults(
         func=carrier_role,
         transport="mavlink-serial",

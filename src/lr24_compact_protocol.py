@@ -19,6 +19,8 @@ from typing import Iterable
 
 MAGIC = b"L2"
 VERSION = 1
+PLAN_SCHEMA_VERSION = 2
+PLAN_VALIDITY_QUANTUM_MS = 100
 HEADER = struct.Struct("<2sBBB")
 CRC = struct.Struct("<H")
 U32_MASK = 0xFFFFFFFF
@@ -77,7 +79,7 @@ class PlanFlag(enum.IntFlag):
 
 MINI_STATE = struct.Struct("<BIIhhhhhhHH")
 PLAN_COMMAND = struct.Struct("<HBBIIIhhHHHHH")
-CORRIDOR_PLAN = struct.Struct("<HIIIhhhhHHIHHHHHH")
+CORRIDOR_PLAN = struct.Struct("<BHIIIhhhhHHIHHHHHHIHHHHHH")
 ABORT_MESSAGE = struct.Struct("<BBHIIH")
 FIELD_ORIGIN = struct.Struct("<HIIiiiH")
 PING = struct.Struct("<IQ")
@@ -86,6 +88,49 @@ PING = struct.Struct("<IQ")
 def clamp_int(value: float, low: int, high: int) -> int:
     rounded = value if isinstance(value, int) else round(value)
     return max(low, min(high, int(rounded)))
+
+
+def require_wire_int(name: str, value: int, low: int, high: int) -> int:
+    """Return an integer wire value or reject it instead of clamping it."""
+
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{name} must be an integer")
+    if not low <= value <= high:
+        raise ValueError(f"{name} out of range [{low}, {high}]: {value}")
+    return value
+
+
+def ceil_to_100ms(value_ms: int) -> int:
+    if isinstance(value_ms, bool) or not isinstance(value_ms, int):
+        raise ValueError("value_ms must be an integer")
+    if value_ms < 0:
+        raise ValueError(f"value_ms must be nonnegative: {value_ms}")
+    value = value_ms
+    return ((value + PLAN_VALIDITY_QUANTUM_MS - 1) // PLAN_VALIDITY_QUANTUM_MS) * (
+        PLAN_VALIDITY_QUANTUM_MS
+    )
+
+
+def corridor_plan_post_tangent_reserve_ms(
+    terminal_completion_budget_ms: int,
+    completion_hold_ms: int,
+    command_ttl_ms: int,
+    local_command_watchdog_ms: int,
+    plan_timing_guard_ms: int,
+) -> int:
+    return (
+        terminal_completion_budget_ms
+        + completion_hold_ms
+        + max(command_ttl_ms, local_command_watchdog_ms)
+        + plan_timing_guard_ms
+    )
+
+
+def corridor_plan_required_validity_ms(
+    mini_arrival_delay_ms: int,
+    post_tangent_reserve_ms: int,
+) -> int:
+    return ceil_to_100ms(mini_arrival_delay_ms + post_tangent_reserve_ms)
 
 
 def u32_forward_delta(start: int, end: int) -> int:
@@ -320,6 +365,7 @@ class PlanCommand:
 
 @dataclass(frozen=True)
 class CorridorPlanCompact:
+    plan_schema_version: int
     plan_id: int
     seq: int
     timestamp_ms: int
@@ -335,6 +381,13 @@ class CorridorPlanCompact:
     mini_speed_mps: float
     carrier_max_speed_mps: float
     target_front_gap_m: float
+    required_validity_ms: int
+    post_tangent_reserve_ms: int
+    terminal_completion_budget_ms: int
+    completion_hold_ms: int
+    plan_timing_guard_ms: int
+    command_ttl_ms: int
+    local_command_watchdog_ms: int
     flags: int = 0
     origin_id: int = 0
 
@@ -343,30 +396,63 @@ class CorridorPlanCompact:
         return validity_window_ms(self.timestamp_ms, self.valid_until_ms)
 
     def encode(self) -> bytes:
+        require_wire_int(
+            "plan_schema_version", self.plan_schema_version, 0, 0xFF
+        )
+        require_wire_int("timestamp_ms", self.timestamp_ms, 0, U32_MASK)
+        require_wire_int("valid_until_ms", self.valid_until_ms, 0, U32_MASK)
+        require_wire_int(
+            "mini_arrival_delay_ms", self.mini_arrival_delay_ms, 0, U32_MASK
+        )
+        require_wire_int(
+            "required_validity_ms", self.required_validity_ms, 0, U32_MASK
+        )
+        for name in (
+            "post_tangent_reserve_ms",
+            "terminal_completion_budget_ms",
+            "completion_hold_ms",
+            "plan_timing_guard_ms",
+            "command_ttl_ms",
+            "local_command_watchdog_ms",
+        ):
+            require_wire_int(name, getattr(self, name), 0, 0xFFFF)
+        timing_error = corridor_plan_timing_error(self)
+        if timing_error is not None:
+            raise ValueError(f"invalid corridor plan timing: {timing_error}")
+
         trigger_phase = self.trigger_phase_rad % (2.0 * math.pi)
         return CORRIDOR_PLAN.pack(
+            self.plan_schema_version,
             clamp_int(self.plan_id, 0, 0xFFFF),
             clamp_int(self.seq, 0, 0xFFFFFFFF),
-            clamp_int(self.timestamp_ms, 0, 0xFFFFFFFF),
-            clamp_int(self.valid_until_ms, 0, 0xFFFFFFFF),
+            self.timestamp_ms,
+            self.valid_until_ms,
             clamp_int(self.rendezvous_x_m * 100.0, -32768, 32767),
             clamp_int(self.rendezvous_y_m * 100.0, -32768, 32767),
             clamp_int(self.tangent_dir_x * 10000.0, -32768, 32767),
             clamp_int(self.tangent_dir_y * 10000.0, -32768, 32767),
             clamp_int(self.corridor_length_m * 100.0, 0, 0xFFFF),
             clamp_int(self.ahead_distance_m * 100.0, 0, 0xFFFF),
-            clamp_int(self.mini_arrival_delay_ms, 0, 0xFFFFFFFF),
+            self.mini_arrival_delay_ms,
             clamp_int(trigger_phase * 18000.0 / math.pi, 0, 0xFFFF),
             clamp_int(self.mini_speed_mps * 100.0, 0, 0xFFFF),
             clamp_int(self.carrier_max_speed_mps * 100.0, 0, 0xFFFF),
             clamp_int(self.target_front_gap_m * 100.0, 0, 0xFFFF),
             clamp_int(self.flags, 0, 0xFFFF),
             clamp_int(self.origin_id, 0, 0xFFFF),
+            self.required_validity_ms,
+            self.post_tangent_reserve_ms,
+            self.terminal_completion_budget_ms,
+            self.completion_hold_ms,
+            self.plan_timing_guard_ms,
+            self.command_ttl_ms,
+            self.local_command_watchdog_ms,
         )
 
     @staticmethod
     def decode(payload: bytes) -> "CorridorPlanCompact":
         (
+            plan_schema_version,
             plan_id,
             seq,
             timestamp_ms,
@@ -384,8 +470,16 @@ class CorridorPlanCompact:
             target_front_gap_cm,
             flags,
             origin_id,
+            required_validity_ms,
+            post_tangent_reserve_ms,
+            terminal_completion_budget_ms,
+            completion_hold_ms,
+            plan_timing_guard_ms,
+            command_ttl_ms,
+            local_command_watchdog_ms,
         ) = CORRIDOR_PLAN.unpack(payload)
         return CorridorPlanCompact(
+            plan_schema_version=plan_schema_version,
             plan_id=plan_id,
             seq=seq,
             timestamp_ms=timestamp_ms,
@@ -401,9 +495,60 @@ class CorridorPlanCompact:
             mini_speed_mps=mini_speed_cms / 100.0,
             carrier_max_speed_mps=carrier_max_speed_cms / 100.0,
             target_front_gap_m=target_front_gap_cm / 100.0,
+            required_validity_ms=required_validity_ms,
+            post_tangent_reserve_ms=post_tangent_reserve_ms,
+            terminal_completion_budget_ms=terminal_completion_budget_ms,
+            completion_hold_ms=completion_hold_ms,
+            plan_timing_guard_ms=plan_timing_guard_ms,
+            command_ttl_ms=command_ttl_ms,
+            local_command_watchdog_ms=local_command_watchdog_ms,
             flags=flags,
             origin_id=origin_id,
         )
+
+
+def corridor_plan_timing_error(plan: CorridorPlanCompact) -> str | None:
+    """Return a stable fail-closed reason for a schema-v2 timing contract."""
+
+    if plan.plan_schema_version != PLAN_SCHEMA_VERSION:
+        return "unsupported_plan_schema"
+
+    positive_fields = (
+        "mini_arrival_delay_ms",
+        "required_validity_ms",
+        "post_tangent_reserve_ms",
+        "terminal_completion_budget_ms",
+        "completion_hold_ms",
+        "command_ttl_ms",
+        "local_command_watchdog_ms",
+    )
+    for name in positive_fields:
+        if getattr(plan, name) <= 0:
+            return f"invalid_plan_timing:{name}"
+    if plan.plan_timing_guard_ms < 0:
+        return "invalid_plan_timing:plan_timing_guard_ms"
+    if plan.validity_ms <= 0:
+        return "invalid_plan_timing:validity_ms"
+
+    expected_reserve_ms = corridor_plan_post_tangent_reserve_ms(
+        plan.terminal_completion_budget_ms,
+        plan.completion_hold_ms,
+        plan.command_ttl_ms,
+        plan.local_command_watchdog_ms,
+        plan.plan_timing_guard_ms,
+    )
+    if plan.post_tangent_reserve_ms != expected_reserve_ms:
+        return "invalid_post_tangent_reserve"
+
+    expected_required_validity_ms = corridor_plan_required_validity_ms(
+        plan.mini_arrival_delay_ms,
+        plan.post_tangent_reserve_ms,
+    )
+    if plan.required_validity_ms != expected_required_validity_ms:
+        return "invalid_required_validity"
+    if plan.validity_ms < plan.required_validity_ms:
+        return "plan_validity_below_required"
+    return None
 
 
 @dataclass(frozen=True)
@@ -511,10 +656,13 @@ def describe_frame(frame: Frame) -> str:
     if frame.msg_type == MessageType.CORRIDOR_PLAN:
         msg = CorridorPlanCompact.decode(frame.payload)
         return (
-            f"CORRIDOR_PLAN seq={msg.seq} plan={msg.plan_id} "
+            f"CORRIDOR_PLAN schema={msg.plan_schema_version} "
+            f"seq={msg.seq} plan={msg.plan_id} "
             f"T=({msg.rendezvous_x_m:.2f},{msg.rendezvous_y_m:.2f}) "
             f"dir=({msg.tangent_dir_x:.3f},{msg.tangent_dir_y:.3f}) "
             f"arrival_delay_ms={msg.mini_arrival_delay_ms} "
+            f"required_validity_ms={msg.required_validity_ms} "
+            f"reserve_ms={msg.post_tangent_reserve_ms} "
             f"trigger={msg.trigger_phase_rad:.3f} "
             f"mini_v={msg.mini_speed_mps:.2f} carrier_max={msg.carrier_max_speed_mps:.2f} "
             f"origin={msg.origin_id}"
