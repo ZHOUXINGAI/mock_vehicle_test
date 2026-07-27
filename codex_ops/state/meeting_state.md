@@ -275,6 +275,24 @@ Update from Ground at 2026-07-28 03:45 CST:
 - Canonical result:
   `codex_ops/inbox/docking/20260728_034500_ground_result_easydocking-validity-and-bridge-regression.md`.
 
+## Pair B CorridorPlan Schema 2
+
+Update from Orin1, Orin2, and Ground at 2026-07-28 04:22 CST:
+
+- Commit `a9aded8` keeps the LR24 envelope at version 1 and upgrades only the
+  `CORRIDOR_PLAN` payload to schema 2.
+- Payload/frame sizes are `59/66 bytes`; MAVLink TUNNEL budget is `83 bytes`.
+- Sender and Mini independently fail closed on schema, integer range,
+  reserve-equation, required-validity, and validity-margin failures.
+- Ground and Orin1 pass 17 compact/guard, 7 TUNNEL, 11 analysis, and 36
+  coordination tests. Orin2 independently passes the 35 protocol/TUNNEL/
+  analysis tests.
+- Direct peer lineage completed without Ground relaying review content:
+  `fcaff474-...` -> `59ce579e-...` -> `0cf7c94a-...`.
+- Orin2 found no blocking issue; Orin1 acknowledged and accepted the verdict.
+- Canonical result:
+  `codex_ops/inbox/docking/20260728_042200_ground_result_pairb-schema2-direct-peer-review.md`.
+
 ## Cloud Coordination Validation
 
 Local no-hardware end-to-end validation passed on 2026-07-23:
