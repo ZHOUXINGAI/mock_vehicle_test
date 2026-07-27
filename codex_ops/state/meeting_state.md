@@ -1,6 +1,6 @@
 # Shared Meeting State
 
-Last updated: 2026-07-23 CST
+Last updated: 2026-07-27 CST
 
 This is the operational shared whiteboard for the rover/docking Codex pair.
 Project-specific docs in each repo still contain details, but this file is the
@@ -9,7 +9,8 @@ first place both agents read for current decisions.
 ## Current Boss Decisions
 
 - Carrier/Orin1 is the onboard docking leader.
-- Mini/Orin2 is the faster fixed-wing mock.
+- Carrier/Orin1 is the quadrotor carrier/mother aircraft.
+- Mini/Orin2 is the fixed-wing child aircraft.
 - Current `/home/seeed` coordination host is Orin2 / Mini, the fixed-wing
   child-aircraft simulation side. Its peer is Orin1 / Carrier, the quadrotor
   mother-aircraft simulation side.
@@ -19,14 +20,18 @@ first place both agents read for current decisions.
 - Codex agents coordinate through `mock_vehicle_test/codex_ops` plus each code
   repo's handoff/state docs.
 - The two Codex homes remain separate.
-- Orin2 / Mini Codex owns the Mini rover execution layer and the
+- Orin2 / Mini Codex owns the Mini aircraft execution layer and the
   `MiniState`/`PlanCommand` LR24 endpoint. It does not own or run the primary
   `easydocking` planner.
 - Orin1 / Carrier is the docking leader: it receives Mini state, runs the
-  planner, and emits phase, primitive, corridor, or abort commands.
-- Boss approved a Huawei ECS coordination control plane for continuous Codex
-  collaboration. Persistent Orin1 and Orin2 workers communicate through mTLS
-  NATS JetStream and can dispatch structured peer tasks directly.
+  planner, and actively publishes the docking corridor and commands to both
+  Carrier local execution and Orin2 / Mini.
+- The current Codex coordination control plane is the Ground computer's
+  private-LAN mTLS NATS JetStream endpoint. Do not use a public cloud, FRP, or
+  Huawei ECS for the present deployment.
+- Persistent Orin1 and Orin2 workers can dispatch structured peer tasks
+  directly. Ground initiates or observes work but must not relay normal peer
+  messages.
 - GitHub remains the canonical source-code/decision/audit channel. NATS is the
   live wake-up/ACK/progress/result channel; OBS is optional for large artifacts.
 - The cloud coordination service is never part of LR24, MAVLink, PX4, Offboard,
@@ -59,7 +64,7 @@ docking:
 rover Codex:
   real rover, PX4 rover, MAVROS, QGC, RC safety, Arduino/D24A, LR24 field tests
 
-Orin2 / Mini rover Codex (current /home/seeed host):
+Orin2 / Mini aircraft Codex (current /home/seeed host):
   Mini execution, timestamped MiniState sender, validated PlanCommand receiver,
   body-frame primitive adapter, local timeout/stop/abort; no primary planner
 
@@ -67,6 +72,39 @@ docking Codex:
   Orin1 / Carrier leader, easydocking planner, CorridorPlan, simulation,
   metrics, reports, algorithm contracts
 ```
+
+## End Goal And Staged Path
+
+The end goal is physical docking between two aircraft:
+
+```text
+Orin1 / Carrier:
+  quadrotor carrier/mother aircraft
+  owns easydocking and the Docking planner
+  active command publisher
+  publishes the docking corridor and commands to itself and Orin2
+
+Orin2 / Mini:
+  fixed-wing child aircraft
+  publishes Mini state
+  validates and executes Carrier commands under local safety gates
+```
+
+The approved staged path is:
+
+1. persistent Ground Codex <-> Orin1 Codex and Ground Codex <-> Orin2 Codex;
+2. direct Orin1 Codex <-> Orin2 Codex structured peer-task round trip;
+3. read-only review of Orin1 `easydocking` planner contracts and the existing
+   three-radio design;
+4. no-motion targeted LR24 exchange of aircraft state, corridor and commands;
+5. software-in-the-loop and hardware-in-the-loop validation with outputs
+   disabled;
+6. separately authorized flight/motion tests and, only after safety gates pass,
+   docking trials.
+
+The existing rover-style `v_mps` / `omega_radps` Pair B fixtures are transport
+and safety test artifacts. They must not be treated as a finalized fixed-wing
+or quadrotor flight-control command contract.
 
 ## Current LR24 Topology
 

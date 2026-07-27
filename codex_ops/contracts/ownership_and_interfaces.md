@@ -54,6 +54,20 @@ valid_until_ms
 Planner code may produce global geometry, but rover low-level execution must
 convert it locally to body-frame `v, omega`.
 
+## Aircraft Transition Boundary
+
+The final system is not a two-rover system. It is a quadrotor Carrier and a
+fixed-wing Mini. The rover `v_mps` / `omega_radps` primitive above remains a
+legacy no-motion transport/safety fixture and must not be connected directly
+to either aircraft's flight-control output.
+
+Before aircraft motion is authorized, Orin1's `easydocking` planner contract
+must define the flight-domain state, corridor, timing, frame, validity and
+abort semantics. Carrier is the active publisher: it distributes the docking
+corridor and commands to both Carrier local execution and Orin2 / Mini. Each
+aircraft retains its own local freshness, geofence, mode, abort and failsafe
+gates.
+
 ## Mini Command Acceptance And Safety
 
 - Mini rejects duplicate, out-of-order, malformed, stale, or expired commands.
