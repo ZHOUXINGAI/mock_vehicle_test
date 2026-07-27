@@ -256,6 +256,25 @@ Persistent operational rule learned on 2026-07-23:
   Never place an SSH or sudo password in a command, environment variable,
   script, log, Git, or memory.
 
+## EasyDocking Software Gate Update
+
+Update from Ground at 2026-07-28 03:45 CST:
+
+- EasyDocking `main` is at `0f17a82`; Ground, Orin1, and Orin2 each pass all
+  28 focused offline tests and the deterministic replay.
+- `GroundCorridorPlan` schema 2 now rejects a plan when its requested validity
+  cannot cover Mini arrival plus terminal completion, completion hold, command
+  expiry/watchdog, and timing guard. It never silently extends the plan.
+- Nominal replay values are arrival `28398ms`, reserve `3350ms`, required
+  `31800ms`, requested `32000ms`, and margin `200ms`.
+- `target_front_gap_m` remains protocol metadata; exact physical gap closure
+  is not yet implemented.
+- Orin1 long-task regression `bca110c0-cbc9-4d01-97ff-a24b99e09a5f`
+  completed once with attempts=1, one accepted event, one completed event,
+  unchanged PID, and zero systemd restarts.
+- Canonical result:
+  `codex_ops/inbox/docking/20260728_034500_ground_result_easydocking-validity-and-bridge-regression.md`.
+
 ## Cloud Coordination Validation
 
 Local no-hardware end-to-end validation passed on 2026-07-23:
