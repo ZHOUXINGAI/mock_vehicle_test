@@ -164,6 +164,9 @@ The installer verifies the observe policy and native Codex binary, pins an
 existing local rollout, backs up the installed configuration, enables the
 service at boot, and keeps the chat mirror read-only. Never run the visible
 Bridge or interactive `codex resume` concurrently with this service.
+The Orin1 unit also carries the same localhost proxy environment used by its
+login shell (`127.0.0.1:7897`); the local proxy must be running before Codex
+turns can reach the OpenAI service.
 
 ## Git Fallback
 
