@@ -35,6 +35,7 @@ from codex_ops.realtime.safety import PolicyRejected, WorkerPolicy
 from codex_ops.realtime.store import TaskStore
 from codex_ops.scripts.pin_agent_codex_session import pin_session
 from codex_ops.scripts.set_agent_codex_enabled import update_config
+from codex_ops.scripts.set_agent_nats_endpoint import update_endpoint
 
 
 class ProtocolTests(unittest.TestCase):
@@ -634,6 +635,60 @@ class SessionPinTests(unittest.TestCase):
                     codex_home=codex_home,
                     agent_id="orin1-carrier",
                     session_id="019e3b9d-missing",
+                )
+
+
+class NatsEndpointUpdateTests(unittest.TestCase):
+    def test_update_endpoint_preserves_mode_and_creates_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "orin1.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "agent_id": "orin1-carrier",
+                        "nats": {"servers": ["tls://192.168.43.13:4222"]},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            path.chmod(0o600)
+
+            backup = update_endpoint(
+                path,
+                endpoint="tls://192.168.1.35:4222",
+                require_agent="orin1-carrier",
+            )
+
+            self.assertIsNotNone(backup)
+            self.assertTrue(backup.is_file())  # type: ignore[union-attr]
+            self.assertEqual(
+                json.loads(path.read_text())["nats"]["servers"],
+                ["tls://192.168.1.35:4222"],
+            )
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_update_endpoint_refuses_wrong_agent_and_port(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "agent.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "agent_id": "orin2-mini",
+                        "nats": {"servers": ["tls://192.168.43.13:4222"]},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "agent mismatch"):
+                update_endpoint(
+                    path,
+                    endpoint="tls://192.168.1.35:4222",
+                    require_agent="orin1-carrier",
+                )
+            with self.assertRaisesRegex(RuntimeError, "4222"):
+                update_endpoint(
+                    path,
+                    endpoint="tls://192.168.1.35:8222",
                 )
 
 

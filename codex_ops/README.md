@@ -28,7 +28,7 @@ remains the source-code and audit path.
 ## Live Coordination
 
 ```text
-Huawei ECS NATS JetStream
+Ground NATS JetStream
   codex.task.orin1-carrier -> persistent Orin1 worker
   codex.task.orin2-mini    -> persistent Orin2 worker
   codex.event.*            -> ACK/progress/result stream
@@ -43,6 +43,21 @@ Deployment and commissioning:
 ```text
 docs/codex_cloud_coordination_runbook.md
 ```
+
+When the Ground Wi-Fi IPv4 changes, preserve the existing CA and client
+certificates. Rotate only the server certificate, update Boss/agent endpoints,
+then restart NATS:
+
+```bash
+./codex_ops/cloud/rotate_server_cert.sh <NEW_GROUND_WIFI_IPV4>
+./codex_ops/scripts/set_agent_nats_endpoint.py \
+  --config codex_ops/local/boss.json \
+  --endpoint tls://<NEW_GROUND_WIFI_IPV4>:4222
+```
+
+On each commissioned agent, run the endpoint updater with
+`--require-agent <agent-id>`. Keep TCP 4222 restricted to the current Private
+LAN subnet and keep 8222 bound to localhost.
 
 ## Visible Interactive Codex (Recommended)
 
