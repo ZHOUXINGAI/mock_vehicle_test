@@ -90,8 +90,23 @@ class AgentDaemon:
     async def _keep_task_alive(self, message: Any, task: TaskEnvelope) -> None:
         while True:
             await asyncio.sleep(20)
+            await self._refresh_task_lease(message, task)
+
+    async def _refresh_task_lease(self, message: Any, task: TaskEnvelope) -> bool:
+        """Best-effort lease refresh that cannot abort a completed Codex turn."""
+
+        try:
             await message.in_progress()
             await self.emit("progress", task=task, summary="Codex turn still running")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            LOG.exception(
+                "task keepalive refresh failed; Codex turn continues task=%s",
+                task.task_id,
+            )
+            return False
+        return True
 
     async def _dispatch_peer_requests(
         self, parent: TaskEnvelope, result: CodexRunResult
@@ -219,10 +234,16 @@ class AgentDaemon:
             return
         finally:
             keepalive.cancel()
-            try:
-                await keepalive
-            except asyncio.CancelledError:
-                pass
+            keepalive_result = await asyncio.gather(keepalive, return_exceptions=True)
+            if (
+                keepalive_result
+                and isinstance(keepalive_result[0], Exception)
+                and not isinstance(keepalive_result[0], asyncio.CancelledError)
+            ):
+                LOG.error(
+                    "task keepalive stopped unexpectedly after Codex turn: %s",
+                    keepalive_result[0],
+                )
             activity_queue.put_nowait(None)
             activity_result = await asyncio.gather(activity_pump_task, return_exceptions=True)
             if activity_result and isinstance(activity_result[0], Exception):

@@ -9,6 +9,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 from codex_ops.realtime.agentd import AgentDaemon
 from codex_ops.realtime.app_server_driver import (
@@ -135,6 +136,61 @@ class StoreTests(unittest.TestCase):
             store.finish(task.task_id, "completed", "done")
             self.assertEqual(store.claim(task), (False, 1, "completed"))
             store.close()
+
+
+class KeepaliveTests(unittest.TestCase):
+    def test_refresh_failure_is_logged_without_escaping(self) -> None:
+        class FailingMessage:
+            async def in_progress(self) -> None:
+                raise RuntimeError("temporary NATS failure")
+
+        daemon = AgentDaemon.__new__(AgentDaemon)
+        daemon.emit = AsyncMock()  # type: ignore[method-assign]
+        task = TaskEnvelope.create(
+            from_agent="boss",
+            to_agent="orin1-carrier",
+            task_type="analysis",
+            objective="read-only",
+            repo="mock_vehicle_test",
+        )
+
+        with self.assertLogs("codex-agentd", level="ERROR") as captured:
+            refreshed = asyncio.run(
+                daemon._refresh_task_lease(FailingMessage(), task)
+            )
+
+        self.assertFalse(refreshed)
+        self.assertIn("Codex turn continues", captured.output[0])
+        daemon.emit.assert_not_awaited()  # type: ignore[attr-defined]
+
+    def test_successful_refresh_marks_progress_and_emits_heartbeat(self) -> None:
+        class Message:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            async def in_progress(self) -> None:
+                self.calls += 1
+
+        daemon = AgentDaemon.__new__(AgentDaemon)
+        daemon.emit = AsyncMock()  # type: ignore[method-assign]
+        message = Message()
+        task = TaskEnvelope.create(
+            from_agent="boss",
+            to_agent="orin1-carrier",
+            task_type="analysis",
+            objective="read-only",
+            repo="mock_vehicle_test",
+        )
+
+        refreshed = asyncio.run(daemon._refresh_task_lease(message, task))
+
+        self.assertTrue(refreshed)
+        self.assertEqual(message.calls, 1)
+        daemon.emit.assert_awaited_once_with(  # type: ignore[attr-defined]
+            "progress",
+            task=task,
+            summary="Codex turn still running",
+        )
 
 
 class DriverTests(unittest.TestCase):
