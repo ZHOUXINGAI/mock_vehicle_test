@@ -113,6 +113,20 @@ class AppServerDriver:
         )
         temporary.replace(self.config.session_file)
 
+    def _thread_sandbox(self) -> str:
+        """Return the app-server thread sandbox matching the local worker policy."""
+        return self.policy.sandbox_mode
+
+    def _turn_sandbox_policy(self, repo: Path) -> dict[str, Any]:
+        """Scope a code turn to the already validated addressed repository."""
+        if self.policy.mode == "observe":
+            return {"type": "readOnly", "networkAccess": False}
+        return {
+            "type": "workspaceWrite",
+            "writableRoots": [str(repo.resolve())],
+            "networkAccess": False,
+        }
+
     @staticmethod
     def _subprocess_env(codex_home: Path) -> dict[str, str]:
         environment = dict(os.environ)
@@ -360,14 +374,14 @@ will deliver it automatically. Do not ask the boss or user to relay normal peer 
                         "threadId": thread_id,
                         "cwd": str(repo),
                         "approvalPolicy": "never",
-                        "sandbox": "read-only",
+                        "sandbox": self._thread_sandbox(),
                     }
                 else:
                     method = "thread/start"
                     params = {
                         "cwd": str(repo),
                         "approvalPolicy": "never",
-                        "sandbox": "read-only",
+                        "sandbox": self._thread_sandbox(),
                         "serviceName": "mock_vehicle_codex_bridge",
                     }
                     if self.config.model:
@@ -402,7 +416,7 @@ will deliver it automatically. Do not ask the boss or user to relay normal peer 
                     params = {
                         "cwd": str(repo),
                         "approvalPolicy": "never",
-                        "sandbox": "read-only",
+                        "sandbox": self._thread_sandbox(),
                         "serviceName": "mock_vehicle_codex_bridge",
                     }
                     if self.config.model:
@@ -438,7 +452,7 @@ will deliver it automatically. Do not ask the boss or user to relay normal peer 
                         "input": [{"type": "text", "text": self.task_prompt(task)}],
                         "cwd": str(repo),
                         "approvalPolicy": "never",
-                        "sandboxPolicy": {"type": "readOnly"},
+                        "sandboxPolicy": self._turn_sandbox_policy(repo),
                         "outputSchema": output_schema,
                     },
                     deadline=deadline,

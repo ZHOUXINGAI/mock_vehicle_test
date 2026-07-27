@@ -370,6 +370,61 @@ for line in sys.stdin:
         self.assertIsNotNone(activity)
         self.assertNotIn("private chain of thought", activity["summary"])  # type: ignore[index]
 
+    def test_app_server_sandbox_matches_worker_policy_and_current_repo(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repo = root / "repo"
+            other_repo = root / "other"
+            repo.mkdir()
+            other_repo.mkdir()
+            config = CodexDriverConfig(
+                agent_id="orin1-carrier",
+                role="test",
+                codex_home=root / ".codex",
+                session_file=root / "session.json",
+                output_schema=root / "schema.json",
+                result_dir=root / "runs",
+                binary="/bin/false",
+                backend="app-server",
+                timeout_sec=5,
+            )
+
+            observe = AppServerDriver(
+                config,
+                WorkerPolicy.create(
+                    agent_id="orin1-carrier",
+                    mode="observe",
+                    allowed_roots=[str(repo), str(other_repo)],
+                ),
+            )
+            self.assertEqual(observe._thread_sandbox(), "read-only")
+            self.assertEqual(
+                observe._turn_sandbox_policy(repo),
+                {"type": "readOnly", "networkAccess": False},
+            )
+
+            code = AppServerDriver(
+                config,
+                WorkerPolicy.create(
+                    agent_id="orin1-carrier",
+                    mode="code",
+                    allowed_roots=[str(repo), str(other_repo)],
+                ),
+            )
+            self.assertEqual(code._thread_sandbox(), "workspace-write")
+            self.assertEqual(
+                code._turn_sandbox_policy(repo),
+                {
+                    "type": "workspaceWrite",
+                    "writableRoots": [str(repo.resolve())],
+                    "networkAccess": False,
+                },
+            )
+            self.assertNotIn(
+                str(other_repo.resolve()),
+                code._turn_sandbox_policy(repo)["writableRoots"],
+            )
+
     def test_app_server_command_activity_is_human_readable(self) -> None:
         activity = format_app_server_activity(
             {
