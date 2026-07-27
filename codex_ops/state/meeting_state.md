@@ -214,6 +214,30 @@ lineage and committed Git artifacts.
 If the cloud broker is unavailable, use the Git inbox/event flow above as the
 fallback and reconcile it after connectivity returns.
 
+## Current Two-Rover EasyDocking Stage
+
+Update from Ground and Orin1 at 2026-07-27 23:45 CST:
+
+- The current physical platform is two ground rovers, not aircraft. Orin1 is
+  the Carrier rover and Orin2 is the Mini rover.
+- Each rover previously passed an independent PX4/MAVROS Offboard test. The
+  pair has not yet completed one coordinated two-rover motion run.
+- Aircraft deployment remains the later end goal; it is not the current test
+  stage.
+- Orin1 completed read-only task
+  `f0514326-3a0b-47c8-aa1e-0029f0d7e3a8` using its original Codex session.
+- The repositories contain the 2D tangent/Carrier-arc geometry, finite-field
+  route, Pair B compact protocol/TUNNEL adapter, Mini safety gate, and
+  individual Offboard experience.
+- Missing before motion: a pure-software GroundDockingLeader, two live Pair B
+  endpoints, Carrier/Mini followers, local executors that do not own arm/mode,
+  and a dual-rover orchestrator.
+- First implementation slice is software-only geometry, immutable plan,
+  ground phase machine, Pair B plan adapter, replay, and failure-injection
+  tests. No hardware script should be changed or invoked in this slice.
+- Full audit:
+  `codex_ops/inbox/docking/20260727_234529_ground_result_orin1-two-rover-easydocking-readonly-audit.md`.
+
 ## Windows Ground Command Boundary
 
 Persistent operational rule learned on 2026-07-23:
