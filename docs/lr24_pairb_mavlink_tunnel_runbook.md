@@ -203,3 +203,26 @@ After this run passes, replace simulated Mini state with timestamped MAVROS
 position/velocity/yaw. Keep the command executor disabled. Motion integration
 is a separate stage requiring a new local confirmation and a wheels-lifted
 HOLD/watchdog/abort test.
+
+## 双端离线 benchmark 判定
+
+Carrier 与 Mini 完成同一无运动时间窗后，分别保留现有 `.log` 和 `.csv`
+产物。Ground 收集四个文件后运行：
+
+```bash
+python3 scripts/analyze_lr24_pairb_run.py \
+  --carrier-log CARRIER.log \
+  --carrier-csv CARRIER.csv \
+  --mini-log MINI.log \
+  --mini-csv MINI.csv \
+  --mode targeted \
+  --json-out pairb_report.json
+```
+
+退出码 `0` 表示全部判定通过，`1` 表示输入有效但 benchmark 未通过，
+`2` 表示输入缺失、损坏或 schema 不匹配。`broadcast` 模式仅用于诊断，
+即使通过也不会设置 `directed_acceptance=true`。
+
+分析器只读取离线产物，不打开串口或 MAVLink。它分别使用每台机器自己的
+相对 monotonic 间隔，并通过序列号集合计算双端覆盖率；不得直接比较两台
+机器的绝对 monotonic 时间。
