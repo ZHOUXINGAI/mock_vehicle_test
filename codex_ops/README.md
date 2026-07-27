@@ -152,6 +152,19 @@ least-privilege agent certificate publishes its own events but is intentionally
 not allowed to subscribe to them. Neither mirror consumes a task. It is safe to
 open one mirror on Ground and another on the Orin desktop.
 
+After validating the visible Bridge, install the same app-server backend as the
+single persistent systemd consumer. Stop the visible Bridge first:
+
+```bash
+sudo ./codex_ops/scripts/enable_agent_app_server_service.sh \
+  orin1-carrier <EXISTING_CODEX_SESSION_ID>
+```
+
+The installer verifies the observe policy and native Codex binary, pins an
+existing local rollout, backs up the installed configuration, enables the
+service at boot, and keeps the chat mirror read-only. Never run the visible
+Bridge or interactive `codex resume` concurrently with this service.
+
 ## Git Fallback
 
 At the start of every Codex session:
