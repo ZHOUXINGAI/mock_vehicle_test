@@ -39,6 +39,25 @@ from codex_ops.scripts.set_agent_codex_enabled import update_config
 from codex_ops.scripts.set_agent_nats_endpoint import update_endpoint
 
 
+class RestrictedControlInstallerTests(unittest.TestCase):
+    def test_installer_exposes_only_agent_status_and_restart(self) -> None:
+        installer = Path(
+            "codex_ops/deploy/install_restricted_agent_control.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('case "\\${1:-}" in', installer)
+        self.assertIn("orin1-carrier)", installer)
+        self.assertIn("orin2-mini)", installer)
+        self.assertIn('status)', installer)
+        self.assertIn('restart)', installer)
+        self.assertIn("/usr/bin/systemctl", installer)
+        self.assertIn('echo "usage: \\$0 <status|restart>"', installer)
+        self.assertIn("visudo -cf", installer)
+        self.assertIn("NOPASSWD: $control status", installer)
+        self.assertIn("NOPASSWD: $control restart", installer)
+        self.assertNotIn("NOPASSWD: ALL", installer)
+
+
 class ProtocolTests(unittest.TestCase):
     def test_task_round_trip_and_peer_hop(self) -> None:
         parent = TaskEnvelope.create(
