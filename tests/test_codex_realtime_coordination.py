@@ -367,8 +367,44 @@ for line in sys.stdin:
             }
         )
 
-        self.assertIsNotNone(activity)
-        self.assertNotIn("private chain of thought", activity["summary"])  # type: ignore[index]
+        self.assertIsNone(activity)
+
+    def test_app_server_prompt_requires_public_work_notes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repo = root / "repo"
+            repo.mkdir()
+            config = CodexDriverConfig(
+                agent_id="orin1-carrier",
+                role="test",
+                codex_home=root / ".codex",
+                session_file=root / "session.json",
+                output_schema=root / "schema.json",
+                result_dir=root / "runs",
+                binary="/bin/false",
+                backend="app-server",
+            )
+            driver = AppServerDriver(
+                config,
+                WorkerPolicy.create(
+                    agent_id="orin1-carrier",
+                    mode="observe",
+                    allowed_roots=[str(repo)],
+                ),
+            )
+            prompt = driver.task_prompt(
+                TaskEnvelope.create(
+                    from_agent="boss",
+                    to_agent="orin1-carrier",
+                    task_type="analysis",
+                    objective="Inspect.",
+                    repo="mock_vehicle_test",
+                )
+            )
+
+        self.assertIn("OPERATOR-VISIBLE WORK NOTES", prompt)
+        self.assertIn("[公开工作说明]", prompt)
+        self.assertIn("Private chain-of-thought", prompt)
 
     def test_app_server_sandbox_matches_worker_policy_and_current_repo(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -524,6 +560,26 @@ class ConsoleFormattingTests(unittest.TestCase):
             "[13:30:02] ✅ Orin1/Carrier 已完成：Inspection passed  task=12345678",
         )
 
+    def test_chat_console_labels_public_work_notes(self) -> None:
+        rendered = format_event_as_chat(
+            {
+                "event_type": "activity",
+                "activity_kind": "message",
+                "agent_id": "orin1-carrier",
+                "task_id": "12345678-abcd",
+                "created_at": "2026-07-23T13:30:01+08:00",
+                "summary": (
+                    'Codex：{"status":"completed",'
+                    '"summary":"[公开工作说明] 几何检查",'
+                    '"details":"证据：正交残差非零。\\n决定：改用 acos。\\n下一步：回归测试。"}'
+                ),
+            }
+        )
+
+        self.assertIn("🧭 Orin1/Carrier 公开工作说明", rendered)
+        self.assertIn("几何检查", rendered)
+        self.assertIn("证据：正交残差非零", rendered)
+
     def test_command_events_are_readable(self) -> None:
         activity = format_codex_activity(
             json.dumps(
@@ -551,8 +607,7 @@ class ConsoleFormattingTests(unittest.TestCase):
             )
         )
 
-        self.assertIsNotNone(activity)
-        self.assertNotIn("private model reasoning", activity["summary"])  # type: ignore[index]
+        self.assertIsNone(activity)
 
     def test_accepted_event_includes_concrete_objective(self) -> None:
         line = format_event_for_console(

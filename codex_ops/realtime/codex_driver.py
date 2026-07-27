@@ -123,6 +123,14 @@ CONTEXT FILES
 ACCEPTANCE
 {acceptance}
 
+OPERATOR-VISIBLE WORK NOTES
+The operator is watching this task live. Private chain-of-thought is unavailable and
+must remain private. Replace it with concise public work notes before the first tool
+call and whenever a material finding, decision, failed check, changed plan, or blocker
+occurs. Each note should state observable evidence, the chosen action and why, material
+uncertainty or rejected alternatives, and the next step. Never emit hidden reasoning
+or vague text such as "analyzing next step".
+
 Read repository guidance and current shared meeting state before acting. Return only the
 configured structured result. Put work for the peer in peer_requests; the local agentd
 will deliver it automatically. Do not tell the boss to relay a message manually."""

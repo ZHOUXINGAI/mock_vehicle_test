@@ -118,8 +118,10 @@ def format_codex_activity(line: str, stream: str = "stdout") -> dict[str, str] |
         return {"kind": "search", "summary": f"搜索资料：{_single_line(query)}"}
     if item_type in {"todo_list", "plan"} and completed:
         return {"kind": "plan", "summary": "工作计划已更新"}
-    if item_type == "reasoning" and started:
-        return {"kind": "analysis", "summary": "正在分析下一步（不显示模型隐藏思维）"}
+    if item_type == "reasoning":
+        # Private reasoning is not available.  Suppress repetitive placeholders;
+        # explicit public work notes are rendered as agent messages instead.
+        return None
     return None
 
 
@@ -199,6 +201,19 @@ def _structured_codex_message(summary: str) -> tuple[str, str]:
     return heading, details
 
 
+def _public_work_note(heading: str) -> tuple[bool, str]:
+    text = heading.strip()
+    for prefix in (
+        "[公开工作说明]",
+        "【公开工作说明】",
+        "[工作说明]",
+        "【工作说明】",
+    ):
+        if text.startswith(prefix):
+            return True, text[len(prefix) :].lstrip(" ：:-")
+    return False, text
+
+
 def format_event_as_chat(event: dict[str, Any]) -> str:
     """Render one coordination event as a read-only terminal chat transcript."""
     event_type = str(event.get("event_type", "event"))
@@ -224,8 +239,10 @@ def format_event_as_chat(event: dict[str, Any]) -> str:
         kind = str(event.get("activity_kind") or "")
         if kind == "message":
             heading, details = _structured_codex_message(summary)
+            is_work_note, heading = _public_work_note(heading)
             body = heading if not details else f"{heading}\n\n{details}"
-            return _chat_box(f"🤖 {agent}", body, footer)
+            title = f"🧭 {agent} 公开工作说明" if is_work_note else f"🤖 {agent}"
+            return _chat_box(title, body, footer)
         marker = {
             "command": "🔧",
             "tool": "🧰",

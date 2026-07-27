@@ -56,8 +56,12 @@ def format_app_server_activity(message: dict[str, Any]) -> dict[str, str] | None
         text = " ".join(str(item.get("text", "")).split())
         if text:
             return {"kind": "message", "summary": f"Codex：{text[:2000]}"}
-    if item_type == "reasoning" and not completed:
-        return {"kind": "analysis", "summary": "正在分析下一步（不显示模型隐藏思维）"}
+    if item_type == "reasoning":
+        # App-server intentionally does not expose private chain-of-thought.
+        # Repeating a generic placeholder for every reasoning item creates noise
+        # and can mislead the operator into thinking the worker is stuck.  The
+        # task prompt below asks Codex for explicit public work notes instead.
+        return None
     if item_type == "commandExecution":
         command = " ".join(str(item.get("command", "")).split())
         if completed:
@@ -165,9 +169,28 @@ CONTEXT FILES
 ACCEPTANCE
 {acceptance}
 
+OPERATOR-VISIBLE WORK NOTES
+The operator is watching this task live. Private chain-of-thought is unavailable and
+must remain private. Replace it with concise, useful public work notes:
+- Before the first tool call, state the current interpretation and immediate plan.
+- Whenever a material finding, decision, failed check, changed plan, or blocker occurs,
+  send another ordinary assistant message before continuing.
+- Before a long-running command, say what evidence it should produce. After it finishes,
+  report the actual result and what it changes.
+- A work note must summarize observable reasoning: current finding, relevant evidence,
+  chosen action and why, uncertainty or rejected alternative when material, and next
+  step. Do not emit hidden reasoning, token-by-token deliberation, or vague text such
+  as "analyzing next step".
+- Because this turn has a structured output schema, encode every public work note with
+  the same schema: status="completed", summary beginning with "[公开工作说明]",
+  details containing the evidence/decision/next step, requires_boss=false, and empty
+  artifacts/peer_requests unless those fields are genuinely final. A work note is a
+  progress update, not the final task result.
+
 Read repository guidance and current shared meeting state before acting. Return the
-configured structured result. Put work for the peer in peer_requests; the local bridge
-will deliver it automatically. Do not ask the boss or user to relay normal peer messages."""
+configured structured result at the end. Put work for the peer in peer_requests; the
+local bridge will deliver it automatically. Do not ask the boss or user to relay normal
+peer messages."""
 
     @staticmethod
     def _reader(

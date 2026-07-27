@@ -145,12 +145,16 @@ read-only chat mirror for an operator-facing transcript:
 ```
 
 The mirror renders Ground objectives and Codex replies as chat panels, with
-commands, tools, file changes, analysis status, peer handoffs, and final results
-as readable activity. Ground subscribes to NATS events. The Orin-local mirror
-follows the worker's private mode-0600 `live-events.jsonl`, because the
-least-privilege agent certificate publishes its own events but is intentionally
-not allowed to subscribe to them. Neither mirror consumes a task. It is safe to
-open one mirror on Ground and another on the Orin desktop.
+commands, tools, file changes, public work notes, peer handoffs, and final
+results as readable activity. Public work notes state observable evidence,
+decisions, reasons, uncertainty, and next actions at material milestones.
+Private model chain-of-thought is neither available nor mirrored; repetitive
+generic reasoning placeholders are suppressed. Ground subscribes to NATS
+events. The Orin-local mirror follows the worker's private mode-0600
+`live-events.jsonl`, because the least-privilege agent certificate publishes
+its own events but is intentionally not allowed to subscribe to them. Neither
+mirror consumes a task. It is safe to open one mirror on Ground and another on
+the Orin desktop.
 
 After validating the visible Bridge, install the same app-server backend as the
 single persistent systemd consumer. Stop the visible Bridge first:
