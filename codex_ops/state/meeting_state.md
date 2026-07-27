@@ -290,6 +290,11 @@ Update from Orin1, Orin2, and Ground at 2026-07-28 04:22 CST:
 - Direct peer lineage completed without Ground relaying review content:
   `fcaff474-...` -> `59ce579e-...` -> `0cf7c94a-...`.
 - Orin2 found no blocking issue; Orin1 acknowledged and accepted the verdict.
+- After review, the exact six schema-2 files were applied as an unstaged
+  worktree overlay to Orin2's dirty rover checkout without moving its
+  `a4f39f9` branch or touching other paths. That checkout passes 17 compact/
+  guard and 7 TUNNEL tests; the 11 newer analysis tests remain available and
+  passing in its clean checkout.
 - Canonical result:
   `codex_ops/inbox/docking/20260728_042200_ground_result_pairb-schema2-direct-peer-review.md`.
 

@@ -78,6 +78,24 @@ Orin2 verdict: commit `a9aded8` has no blocking review issue. Orin1
 acknowledged and accepted the verdict, emitted no further peer request, and
 started no hardware process.
 
+## Scoped Orin2 rover-checkout deployment
+
+After the review, Ground verified that the same six target paths had no local
+Orin2 changes, then used Git to restore only those worktree paths from
+`a9aded8`. The index, branch pointer, and every other dirty/untracked path were
+left unchanged.
+
+The old rover checkout does not contain the newer
+`tests/test_lr24_pairb_run_analysis.py`, so an attempted combined pytest
+command stopped at collection with `file or directory not found`; this is a
+checkout-age limitation, not a test failure. In that rover checkout:
+
+- compact protocol and Mini gate: `17/17` passed
+- MAVLink TUNNEL: `7/7` passed
+- direct values: schema `2`, payload `59`, frame `66`
+
+The missing 11 analysis tests passed on Orin2's clean checkout at `a9aded8`.
+
 ## Transport boundary
 
 Pair B carries only compact runtime state, plans, commands, origins, aborts,
@@ -87,9 +105,10 @@ Codex coordination only and never part of the vehicle-control loop.
 
 ## Remaining gates before motion
 
-1. The dirty Orin2 rover checkout has not been merged to `a9aded8`; do not
-   force-update or overwrite it. Runtime deployment needs a scoped integration
-   plan that preserves its local rover work.
+1. The dirty Orin2 rover checkout now has the six schema-2 files as an
+   unstaged worktree overlay, but its branch remains at `a4f39f9`. Reconcile
+   that old branch and its local rover work deliberately; do not force-update
+   or reset it.
 2. Live Carrier/Mini followers and local primitive executors are still not
    connected to the offline leader.
 3. Exact `target_front_gap_m` closed-loop regulation is still not implemented.
