@@ -9,7 +9,7 @@ mock the two-aircraft docking scheme.
 Orin1 / Carrier rover
   Represents the carrier aircraft.
   Runs the high-level docking planner / CorridorPlan leader.
-  Tracks its own arc-to-corridor and terminal-corridor path locally.
+  Tracks its own approach-to-corridor and terminal-corridor path locally.
   Sends compact plans and phase commands to Mini over PairB.
 
 Orin2 / Mini rover
@@ -46,7 +46,7 @@ The aerial controller computes a tangent-intercept CorridorPlan:
 3. Carrier computes the tangent point `T` on the Mini orbit that aligns with
    Mini's orbit direction.
 4. Carrier computes Mini arrival delay from Mini's current orbit phase to `T`.
-5. Carrier follows a smooth arc to `T`, timed to arrive ahead of Mini.
+5. Carrier follows the planned approach to `T`, timed to arrive ahead of Mini.
 6. Mini stays in orbit until the trigger phase, then exits along the tangent.
 7. Both vehicles continue along the same straight terminal corridor.
 8. Carrier must remain ahead of Mini in the tangent frame.
@@ -62,15 +62,19 @@ Mini required stable lap: 1
 Carrier start:            (-7.0, -6.0)
 Carrier max speed:        0.7 m/s
 Carrier max accel:        0.30 m/s^2
-Tangent point T:          (-1.553, -4.224)
-Tangent direction:        (0.939, -0.345)
-Trigger phase:            about 249.8 deg
+Tangent point T:          (0.888, -4.411)
+Tangent direction:        (0.980, 0.197)
+Trigger phase:            about 281.4 deg
 Terminal path target:     about 8 m
 ```
 
 The expected plot shape is not negotiable: Mini is circle then tangent line;
-Carrier is smooth arc into `T`, then the same straight tangent corridor. A
-visible hook, S-turn, or lateral chase after `T` is a planner failure.
+Carrier reaches `T`, then uses the same straight tangent corridor. With the
+current planner contract and no measured Carrier start heading, `C->T` is the
+exact straight tangent and is represented honestly as a zero-curvature
+`straight_tangent` approach. A future finite-radius arc requires an explicit
+start-heading and Dubins/biarc/clothoid contract. A visible hook, S-turn, or
+lateral chase after `T` remains a planner failure.
 
 ## Low-Level Interface
 
@@ -117,7 +121,7 @@ pairb_bridge_carrier
 mock_docking_leader
   Waits for Mini stable-orbit evidence.
   Computes CorridorPlan using the same geometry as easydocking.
-  Starts Carrier arc tracking.
+  Starts Carrier approach tracking (`ARC` phase name is retained on the wire).
   Logs plan, state, command, distance, front_gap, lateral_gap, and phase.
 
 carrier_primitive_executor
@@ -138,7 +142,8 @@ mini_plan_rx
 mini_primitive_executor
   ORBIT: follow R=4.5 m circle at v=0.9 m/s after low-speed validation.
   TERMINAL: exit at trigger phase and drive along tangent direction.
-  STOP/ABORT: stop local command stream and disarm/hold as configured.
+  STOP/ABORT: stop locally. The current no-motion slice does not disarm or
+  issue any flight-controller command.
 ```
 
 Ground station:
@@ -155,8 +160,8 @@ Optional SSH/log/video over WiFi/4G
    - Mark Mini orbit center `O=(0,0)`.
    - Mark the 4.5 m circle.
    - Mark Carrier start `(-7,-6)`.
-   - Mark tangent point `T=(-1.553,-4.224)`.
-   - Mark a tangent line through `T` along `(0.939,-0.345)`.
+   - Mark tangent point `T=(0.888,-4.411)`.
+   - Mark a tangent line through `T` along `(0.980,0.197)`.
 
 2. No-motion comms:
    - PairB ping/echo.
@@ -167,7 +172,7 @@ Optional SSH/log/video over WiFi/4G
 
 3. Wheels-lifted:
    - Mini ORBIT primitive at low speed, then target `v=0.9`, `|omega|=0.2`.
-   - Carrier arc/terminal primitives at low speed, then target max `0.7`.
+   - Carrier approach/terminal primitives at low speed, then target max `0.7`.
    - Confirm yaw sign, RC stop, QGC stop, Arduino timeout brake.
 
 4. Single-rover ground:
@@ -178,7 +183,7 @@ Optional SSH/log/video over WiFi/4G
    - Mini starts ORBIT and sends real MiniState.
    - Carrier waits until Mini completes one stable lap.
    - Carrier publishes CorridorPlan.
-   - Carrier starts arc tracking.
+   - Carrier starts approach tracking.
    - Mini exits at trigger phase.
    - Both enter terminal tangent corridor.
    - Abort if link stale, front-gap rule fails, lateral error grows, or operator
@@ -193,7 +198,7 @@ Pass:
 
 - Mini completes at least one stable orbit before tangent exit.
 - Mini remains visually faster than Carrier.
-- Carrier follows a smooth arc into `T`.
+- Carrier follows the planned approach into `T` without a hook or S-turn.
 - Terminal segment is a shared straight tangent corridor.
 - Carrier remains ahead in the tangent frame until first pass.
 - First mock pass reaches less than `0.5 m` separation.
@@ -210,15 +215,31 @@ Fail:
 - Either rover spins in place unexpectedly or reverses unexpectedly.
 - Any stop path fails.
 
-## Immediate Implementation Gap
+## Current No-Motion Execution Boundary
 
-The current repo already has the compact LR24 frames and no-motion dry-run.
-The missing execution code is the live bridge from:
+The repo now has a strict structural adapter from EasyDocking plans and
+commands to Pair B, plus guarded Mini and Carrier-local followers. The only
+executor backend in this stage is `no_motion`:
+
+```text
+EasyDocking object -> strict adapter -> Pair B type
+Mini Pair B frame -> MiniCommandGate -> MiniLiveFollower -> NoMotionExecutor
+Carrier local HOLD -> CarrierLocalFollower -> NoMotionExecutor
+```
+
+`NoMotionExecutor` always returns exactly `v=0` and `omega=0`. HOLD, STOP,
+ABORT, TTL expiry, and watchdog fallback remain zero. A motion phase or
+nonzero request is reported as blocked rather than disguised as a successful
+zero command. The dry-run reports executor decisions, zero outputs, blocked
+motion, and nonzero outputs, and exits nonzero if any nonzero output is ever
+observed.
+
+The next separately authorized execution stage remains the hardware bridge:
 
 ```text
 PX4/MAVROS state -> MiniState
 CorridorPlan/PlanCommand -> local primitive executor -> PX4 Offboard v/omega
 ```
 
-Build that bridge in `mock_vehicle_test` first, with a hard no-motion mode by
-default. Only enable Offboard output behind explicit environment confirmations.
+That backend is not present in this slice. Passing pure-software or Pair B
+no-motion tests does not authorize wheels-lifted, Offboard, or motor output.

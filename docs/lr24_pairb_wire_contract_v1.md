@@ -295,6 +295,16 @@ tangent vector within two percent, a new sequence, and a bounded sender TTL.
 The first full docking run also requires `ONE_ORBIT_COMPLETE` before tangent
 exit.
 
+`src/easydocking_pairb_adapter.py` performs the Carrier-side structural
+mapping without importing an installed EasyDocking package. It requires plan
+schema 2, `validity_policy=reject`, no automatic extension, the expected
+`field_enu`/origin identity, exact sender TTL arithmetic, representable wire
+ranges, and bounded quantization error. It maps `tangent_point` directly to
+the rendezvous fields and `terminal_length_m` directly to corridor length.
+The legacy `ahead_distance_cm` field carries the same
+`target_front_gap_m` metadata because GroundCorridorPlan defines one signed
+front-gap target, not a second independent ahead-distance target.
+
 ### PLAN_COMMAND, 30-byte payload, 37-byte frame
 
 ```text
@@ -319,6 +329,15 @@ is `750 ms`. `HOLD` and `STOP` must contain zero `v` and zero `omega`. Reverse
 motion is not allowed in the docking route. `ARC_TO_CORRIDOR` and `TERMINAL`
 must reference the active plan ID. Local limits override every transmitted
 limit.
+
+The EasyDocking command adapter preserves the sender timestamp and
+`valid_until` pair and verifies their uint32 delta equals `ttl_ms`; absolute
+monotonic clocks are never compared across computers. Ground command phases
+map as `HOLD`, `ORBIT`, `ARC->ARC_TO_CORRIDOR`, `TERMINAL`, `STOP`, and
+`ABORT`. The target role maps independently to Mini or Carrier. Since the
+ground command has no distance or duration primitive, Pair B uses its original
+`ttl_ms` as `duration_ms` and sends `distance_cm=0`; it does not invent a new
+execution horizon.
 
 ### ABORT, 14-byte payload, 21-byte frame
 
@@ -361,8 +380,17 @@ Pair B software is split into three layers:
 binary frame parser -> command safety gate -> local rover executor
 ```
 
-The first two layers are implemented and testable with no motion. The executor
-must remain disabled by default and requires local, explicit motion approval.
+The parser and gate are followed by `MiniLiveFollower` on Mini and
+`CarrierLocalFollower` for the Carrier-local branch. The only executor in the
+current slice is `NoMotionExecutor`; it has no serial, ROS, MAVROS, PX4, or
+actuator API and always outputs exactly `v=0`, `omega=0`. Motion phases and
+nonzero requests are explicitly counted as blocked. HOLD/STOP/ABORT and
+watchdog fallback remain zero. The no-motion dry-run records executor
+decisions plus `zero_output_count`, `blocked_motion_count`, and
+`nonzero_output_count`, and fails if `nonzero_output_count` is not zero.
+
+A real rover executor is intentionally absent and requires a later separately
+authorized stage with local motion approval.
 The radio binding LED only proves RF pairing; it does not prove packet loss,
 latency, common coordinates, watchdog behavior, or motor-stop behavior.
 
@@ -377,6 +405,8 @@ Implementation files:
 ```text
 src/lr24_compact_protocol.py
 src/lr24_command_guard.py
+src/easydocking_pairb_adapter.py
+src/lr24_live_follower.py
 src/lr24_field_frame.py
 src/lr24_mavlink_tunnel.py
 scripts/lr24_pairb_dry_run.py

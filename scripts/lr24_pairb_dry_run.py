@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+import struct
 import sys
 import time
 from pathlib import Path
@@ -26,7 +27,6 @@ REPO_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_DIR / "src"))
 
 from lr24_compact_protocol import (  # noqa: E402
-    Abort,
     CorridorPlanCompact,
     FieldOrigin,
     Frame,
@@ -45,7 +45,13 @@ from lr24_compact_protocol import (  # noqa: E402
     encode_frame,
     frame_sizes,
 )
-from lr24_command_guard import CommandGuardPolicy, MiniCommandGate  # noqa: E402
+from lr24_command_guard import CommandGuardPolicy  # noqa: E402
+from lr24_live_follower import (  # noqa: E402
+    CarrierLocalFollower,
+    ExecutorCounters,
+    FollowerOutcome,
+    MiniLiveFollower,
+)
 from lr24_mavlink_tunnel import (  # noqa: E402
     TUNNEL_COMPONENT_ID,
     CompactFrameTransport,
@@ -192,6 +198,55 @@ def print_frame_sizes() -> None:
         print(f"  {name}: {size} bytes")
 
 
+def format_executor_summary(role: str, counters: ExecutorCounters) -> str:
+    return (
+        f"{role} executor_mode=no_motion "
+        f"executor_decisions={counters.executor_decisions} "
+        f"zero_output_count={counters.zero_output_count} "
+        f"blocked_motion_count={counters.blocked_motion_count} "
+        f"nonzero_output_count={counters.nonzero_output_count}"
+    )
+
+
+def dry_run_exit_code(*counters: ExecutorCounters) -> int:
+    return 1 if any(item.nonzero_output_count != 0 for item in counters) else 0
+
+
+def describe_follower_outcome(outcome: FollowerOutcome) -> str:
+    output = outcome.executor_output
+    return (
+        f"gate={outcome.gate_result.decision.value}:{outcome.gate_result.reason} "
+        f"executor={output.decision.value}:{output.reason} "
+        f"output=({output.v_mps:.1f},{output.omega_radps:.1f})"
+    )
+
+
+def safe_describe_frame(frame: Frame) -> str:
+    try:
+        return describe_frame(frame)
+    except (ValueError, struct.error):
+        return f"{frame.msg_type.name} malformed_payload"
+
+
+def make_carrier_local_hold(args: argparse.Namespace, seq: int = 1) -> PlanCommand:
+    stamp = monotonic_ms()
+    return PlanCommand(
+        plan_id=args.plan_id,
+        role=Role.CARRIER,
+        phase=Phase.HOLD,
+        seq=seq,
+        timestamp_ms=stamp,
+        valid_until_ms=(stamp + args.valid_for_ms) & 0xFFFFFFFF,
+        v_mps=0.0,
+        omega_radps=0.0,
+        duration_ms=args.command_duration_ms,
+        distance_m=0.0,
+        max_speed_mps=args.max_speed_mps,
+        max_accel_mps2=args.max_accel_mps2,
+        flags=0,
+    )
+
+
 def open_csv(path: str | None, fieldnames: list[str]) -> tuple[csv.DictWriter, object] | None:
     if not path:
         return None
@@ -208,6 +263,11 @@ def carrier_role(args: argparse.Namespace) -> int:
         raise SystemExit("Non-HOLD phase requires --allow-nonhold-command.")
     if (abs(args.v_mps) > 1.0e-6 or abs(args.omega_radps) > 1.0e-6) and not args.allow_nonhold_command:
         raise SystemExit("Nonzero command requires --allow-nonhold-command.")
+
+    carrier_follower = CarrierLocalFollower()
+    local_hold = make_carrier_local_hold(args)
+    local_outcome = carrier_follower.apply_command(local_hold, monotonic_ms())
+    print(f"carrier local HOLD {describe_follower_outcome(local_outcome)}")
 
     transport = open_transport(args)
     reader = FrameReader()
@@ -401,7 +461,8 @@ def carrier_role(args: argparse.Namespace) -> int:
         f"commands_tx={command_count} corridor_plans_tx={corridor_plan_count} "
         f"field_origins_tx={field_origin_count}"
     )
-    return 0
+    print(format_executor_summary("carrier_local", carrier_follower.executor.counters))
+    return dry_run_exit_code(carrier_follower.executor.counters)
 
 
 def mini_role(args: argparse.Namespace) -> int:
@@ -421,7 +482,7 @@ def mini_role(args: argparse.Namespace) -> int:
     corridor_plan_gaps = 0
     rejected_count = 0
     abort_count = 0
-    gate = MiniCommandGate(
+    follower = MiniLiveFollower(
         CommandGuardPolicy(
             max_linear_speed_mps=args.local_max_speed_mps,
             max_yaw_rate_radps=args.local_max_yaw_rate_radps,
@@ -429,6 +490,9 @@ def mini_role(args: argparse.Namespace) -> int:
             command_watchdog_ms=args.command_watchdog_ms,
         )
     )
+    follower_poll_period_sec = 0.05
+    next_follower_poll = 0.0
+    last_poll_signature: tuple[str, str] | None = None
     csv_bundle = open_csv(
         args.csv,
         ["role", "event", "mono_ms", "seq", "phase", "x_m", "y_m", "v_mps", "omega_radps"],
@@ -466,22 +530,33 @@ def mini_role(args: argparse.Namespace) -> int:
 
             for frame in read_frames(transport, reader, 0.02):
                 if frame.msg_type == MessageType.FIELD_ORIGIN:
-                    result = gate.ingest(frame, monotonic_ms())
-                    print(f"rx {describe_frame(frame)} gate={result.decision.value}:{result.reason}")
+                    outcome = follower.ingest(frame, monotonic_ms())
+                    result = outcome.gate_result
+                    print(
+                        f"rx {safe_describe_frame(frame)} "
+                        f"{describe_follower_outcome(outcome)}"
+                    )
                     if result.decision.value == "reject":
                         rejected_count += 1
                     continue
                 if frame.msg_type == MessageType.ABORT:
-                    abort = Abort.decode(frame.payload)
-                    result = gate.ingest(frame, monotonic_ms())
+                    outcome = follower.ingest(frame, monotonic_ms())
+                    result = outcome.gate_result
                     abort_count += 1
-                    print(
-                        f"rx ABORT seq={abort.seq} reason={abort.reason.name} "
-                        f"gate={result.decision.value}:{result.reason}"
-                    )
+                    print(f"rx {safe_describe_frame(frame)} {describe_follower_outcome(outcome)}")
                     continue
                 if frame.msg_type == MessageType.CORRIDOR_PLAN:
-                    plan = CorridorPlanCompact.decode(frame.payload)
+                    outcome = follower.ingest(frame, monotonic_ms())
+                    result = outcome.gate_result
+                    try:
+                        plan = CorridorPlanCompact.decode(frame.payload)
+                    except (ValueError, struct.error):
+                        print(
+                            f"rx {safe_describe_frame(frame)} "
+                            f"{describe_follower_outcome(outcome)}"
+                        )
+                        rejected_count += 1
+                        continue
                     if (
                         last_corridor_plan_seq is not None
                         and plan.seq != last_corridor_plan_seq + 1
@@ -491,8 +566,10 @@ def mini_role(args: argparse.Namespace) -> int:
                         )
                     last_corridor_plan_seq = plan.seq
                     corridor_plan_count += 1
-                    result = gate.ingest(frame, monotonic_ms())
-                    print(f"rx {describe_frame(frame)} gate={result.decision.value}:{result.reason}")
+                    print(
+                        f"rx {safe_describe_frame(frame)} "
+                        f"{describe_follower_outcome(outcome)}"
+                    )
                     if result.decision.value == "reject":
                         rejected_count += 1
                     if csv_bundle:
@@ -512,15 +589,27 @@ def mini_role(args: argparse.Namespace) -> int:
                         )
                     continue
                 if frame.msg_type != MessageType.PLAN_COMMAND:
-                    print(f"rx {describe_frame(frame)}")
+                    print(f"rx {safe_describe_frame(frame)}")
                     continue
-                cmd = PlanCommand.decode(frame.payload)
+                outcome = follower.ingest(frame, monotonic_ms())
+                result = outcome.gate_result
+                try:
+                    cmd = PlanCommand.decode(frame.payload)
+                except (ValueError, struct.error):
+                    print(
+                        f"rx {safe_describe_frame(frame)} "
+                        f"{describe_follower_outcome(outcome)}"
+                    )
+                    rejected_count += 1
+                    continue
                 if last_command_seq is not None and cmd.seq != last_command_seq + 1:
                     command_gaps += max(0, cmd.seq - last_command_seq - 1)
                 last_command_seq = cmd.seq
                 command_count += 1
-                result = gate.ingest(frame, monotonic_ms())
-                print(f"rx {describe_frame(frame)} gate={result.decision.value}:{result.reason}")
+                print(
+                    f"rx {safe_describe_frame(frame)} "
+                    f"{describe_follower_outcome(outcome)}"
+                )
                 if result.decision.value == "reject":
                     rejected_count += 1
                 if csv_bundle:
@@ -538,6 +627,17 @@ def mini_role(args: argparse.Namespace) -> int:
                             "omega_radps": f"{cmd.omega_radps:.3f}",
                         }
                     )
+
+            if now >= next_follower_poll:
+                poll_outcome = follower.poll(monotonic_ms())
+                signature = (
+                    poll_outcome.gate_result.decision.value,
+                    poll_outcome.gate_result.reason,
+                )
+                if signature != last_poll_signature:
+                    print(f"mini follower poll {describe_follower_outcome(poll_outcome)}")
+                    last_poll_signature = signature
+                next_follower_poll = now + follower_poll_period_sec
     finally:
         transport.close()
         if csv_bundle:
@@ -551,7 +651,8 @@ def mini_role(args: argparse.Namespace) -> int:
         f"corridor_plan_seq_gaps={corridor_plan_gaps} rejected={rejected_count} "
         f"aborts_rx={abort_count}"
     )
-    return 0
+    print(format_executor_summary("mini", follower.executor.counters))
+    return dry_run_exit_code(follower.executor.counters)
 
 
 def build_parser() -> argparse.ArgumentParser:
