@@ -39,7 +39,7 @@ SUMMARY_KEYS = {
         "rejected", "aborts_rx",
     },
 }
-ENDPOINT_RE = re.compile(r"(\d+)\.(\d+)->(\d+)\.(\d+)\s*$")
+ENDPOINT_RE = re.compile(r"(\d+)\.(\d+)->(\d+)\.(\d+)(?=\s|$)")
 
 
 class ArtifactError(ValueError):

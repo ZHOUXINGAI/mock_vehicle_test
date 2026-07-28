@@ -215,6 +215,17 @@ class PairBRunAnalysisTest(unittest.TestCase):
         self.assertTrue(report["pass"])
         self.assertTrue(report["directed_acceptance"])
 
+    def test_targeted_endpoints_allow_trailing_runtime_fields(self):
+        paths = self.make_pair()
+        for log_path in (paths[0], paths[2]):
+            lines = log_path.read_text(encoding="utf-8").splitlines()
+            lines[0] += " state_rate=10.0Hz simulate_orbit=True"
+            log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        report = self.analyze(paths)
+        self.assertTrue(report["pass"])
+        self.assertTrue(report["directed_acceptance"])
+
     def test_broadcast_is_rejected_as_targeted_and_labeled_diagnostic(self):
         paths = self.make_pair(
             carrier_endpoint="1.242->0.0", mini_endpoint="2.242->0.0"
