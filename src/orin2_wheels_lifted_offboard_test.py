@@ -105,8 +105,20 @@ class VehicleObservation:
 
 class InitialStateWaitResult(str, Enum):
     WAITING = "WAITING"
-    OBSERVED = "OBSERVED"
+    SAFE_PRESTATE_READY = "SAFE_PRESTATE_READY"
+    UNSAFE_ARMED = "UNSAFE_ARMED"
     TIMED_OUT = "TIMED_OUT"
+
+
+def initial_safe_prestate_ready(observation: VehicleObservation) -> bool:
+    return bool(
+        observation.state_present
+        and observation.state_age_sec <= STATE_TIMEOUT_SEC
+        and observation.connected
+        and not observation.armed
+        and observation.mode.upper() == "MANUAL"
+        and observation.manual_input
+    )
 
 
 @dataclass(frozen=True)
@@ -122,8 +134,11 @@ class InitialStateWait:
         if (
             observation.state_present
             and observation.state_age_sec <= STATE_TIMEOUT_SEC
+            and observation.armed
         ):
-            return InitialStateWaitResult.OBSERVED
+            return InitialStateWaitResult.UNSAFE_ARMED
+        if initial_safe_prestate_ready(observation):
+            return InitialStateWaitResult.SAFE_PRESTATE_READY
         if now_sec - self.started_sec >= self.timeout_sec:
             return InitialStateWaitResult.TIMED_OUT
         return InitialStateWaitResult.WAITING
@@ -1026,34 +1041,59 @@ def run_live(diagnostic: Diagnostic, namespace: str) -> int:
 
     def wait_for_initial_state(machine: AutoZeroOnlyStateMachine) -> None:
         wait = InitialStateWait(started_sec=time.monotonic())
+        last_transition_fields: tuple[bool, bool, bool, str, bool] | None = None
         log_event(
-            "initial_state_wait_start",
+            "initial_safe_prestate_wait_start",
             f"timeout_sec={wait.timeout_sec:.3f}",
         )
         while rclpy.ok():
             node.publish(ZERO_SETPOINT)
             rclpy.spin_once(node, timeout_sec=0.0)
             now_sec = time.monotonic()
-            result = wait.evaluate(now_sec, node.observation())
-            if result is InitialStateWaitResult.OBSERVED:
+            observation = node.observation()
+            result = wait.evaluate(now_sec, observation)
+            transition_fields = (
+                observation.state_present,
+                observation.connected,
+                observation.armed,
+                observation.mode,
+                observation.manual_input,
+            )
+            if (
+                result is InitialStateWaitResult.WAITING
+                and transition_fields != last_transition_fields
+            ):
                 log_event(
-                    "initial_state_observed",
+                    "initial_safe_prestate_transition",
+                    node.state_diagnostics(),
+                )
+                last_transition_fields = transition_fields
+            if result is InitialStateWaitResult.SAFE_PRESTATE_READY:
+                log_event(
+                    "initial_safe_prestate_ready",
                     node.state_diagnostics(),
                 )
                 machine.start(now_sec)
                 return
+            if result is InitialStateWaitResult.UNSAFE_ARMED:
+                log_event(
+                    "initial_unsafe_armed_detected",
+                    node.state_diagnostics(),
+                )
+                machine.start_recovery("initial_unsafe_armed", now_sec)
+                return
             if result is InitialStateWaitResult.TIMED_OUT:
                 log_event(
-                    "initial_state_wait_timeout",
+                    "initial_safe_prestate_wait_timeout",
                     f"timeout_sec={wait.timeout_sec:.3f} "
                     f"{node.state_diagnostics()}",
                 )
-                machine.start_recovery("initial_state_timeout", now_sec)
+                machine.start_recovery("initial_safe_prestate_timeout", now_sec)
                 return
             time.sleep(period)
 
         log_event(
-            "initial_state_wait_aborted",
+            "initial_safe_prestate_wait_aborted",
             "reason=ros_context_shutdown",
         )
         machine.start_recovery("ros_context_shutdown", time.monotonic())

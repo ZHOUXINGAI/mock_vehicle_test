@@ -252,32 +252,31 @@ class WheelsLiftedTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "live output refused"):
             module.require_live_confirmation(args)
 
-    def test_delayed_first_state_starts_precheck_only_after_observation(self) -> None:
+    def test_cmode_then_manual_starts_precheck_only_at_safe_prestate(self) -> None:
         wait = module.InitialStateWait(started_sec=10.0)
         machine = module.AutoZeroOnlyStateMachine(hold_sec=5.0)
-        missing = self.missing_observation()
+        transitional = self.observation(mode="CMODE(65536)")
 
-        for now in (10.0, 12.0, 14.99):
-            self.assertEqual(
-                wait.evaluate(now, missing),
-                module.InitialStateWaitResult.WAITING,
+        self.assertEqual(
+            wait.evaluate(10.01, transitional),
+            module.InitialStateWaitResult.WAITING,
+        )
+        self.assertFalse(machine.started)
+        self.assertEqual(machine.offboard_requests, 0)
+        self.assertEqual(machine.arm_requests, 0)
+        self.assertTrue(
+            module.setpoint_is_zero(
+                module.auto_setpoint_for_phase(module.AutoPhase.PRECHECK)
             )
-            self.assertFalse(machine.started)
-            self.assertEqual(machine.offboard_requests, 0)
-            self.assertEqual(machine.arm_requests, 0)
-            self.assertTrue(
-                module.setpoint_is_zero(
-                    module.auto_setpoint_for_phase(module.AutoPhase.PRECHECK)
-                )
-            )
+        )
 
         fresh = self.observation()
         self.assertEqual(
-            wait.evaluate(14.995, fresh),
-            module.InitialStateWaitResult.OBSERVED,
+            wait.evaluate(11.02, fresh),
+            module.InitialStateWaitResult.SAFE_PRESTATE_READY,
         )
-        machine.start(14.995)
-        self.assertIsNone(machine.tick(14.995, fresh))
+        machine.start(11.02)
+        self.assertIsNone(machine.tick(11.02, fresh))
         self.assertEqual(machine.phase, module.AutoPhase.ZERO_PRESTREAM)
         self.assertEqual(machine.offboard_requests, 0)
         self.assertEqual(machine.arm_requests, 0)
@@ -296,9 +295,12 @@ class WheelsLiftedTest(unittest.TestCase):
             module.InitialStateWaitResult.TIMED_OUT,
         )
         self.assertFalse(machine.started)
-        machine.start_recovery("initial_state_timeout", 25.0)
+        machine.start_recovery("initial_safe_prestate_timeout", 25.0)
         self.assertEqual(machine.phase, module.AutoPhase.ZERO_EXIT_BURST)
-        self.assertEqual(machine.primary_failure_reason, "initial_state_timeout")
+        self.assertEqual(
+            machine.primary_failure_reason,
+            "initial_safe_prestate_timeout",
+        )
         self.assertEqual(machine.offboard_requests, 0)
         self.assertEqual(machine.arm_requests, 0)
         self.assertTrue(
@@ -320,7 +322,7 @@ class WheelsLiftedTest(unittest.TestCase):
         wait = module.InitialStateWait(started_sec=10.0)
         self.assertEqual(
             wait.evaluate(10.1, observation),
-            module.InitialStateWaitResult.OBSERVED,
+            module.InitialStateWaitResult.SAFE_PRESTATE_READY,
         )
 
         machine = module.AutoZeroOnlyStateMachine(hold_sec=5.0)
@@ -342,6 +344,45 @@ class WheelsLiftedTest(unittest.TestCase):
         self.assertIsNone(machine.tick(20.0, observation))
         self.assertEqual(machine.phase, module.AutoPhase.ZERO_EXIT_BURST)
         self.assertEqual(machine.primary_failure_reason, "state_stale")
+        self.assertEqual(machine.offboard_requests, 0)
+        self.assertEqual(machine.arm_requests, 0)
+        self.assertTrue(
+            module.setpoint_is_zero(
+                module.auto_setpoint_for_phase(machine.phase)
+            )
+        )
+
+    def test_persistent_cmode_times_out_without_entry_requests(self) -> None:
+        wait = module.InitialStateWait(started_sec=30.0)
+        machine = module.AutoZeroOnlyStateMachine(hold_sec=5.0)
+        transitional = self.observation(mode="CMODE(65536)")
+
+        self.assertEqual(
+            wait.evaluate(30.01, transitional),
+            module.InitialStateWaitResult.WAITING,
+        )
+        self.assertEqual(
+            wait.evaluate(35.0, transitional),
+            module.InitialStateWaitResult.TIMED_OUT,
+        )
+        self.assertFalse(machine.started)
+        machine.start_recovery("initial_safe_prestate_timeout", 35.0)
+        self.assertEqual(machine.phase, module.AutoPhase.ZERO_EXIT_BURST)
+        self.assertEqual(machine.offboard_requests, 0)
+        self.assertEqual(machine.arm_requests, 0)
+
+    def test_initial_armed_state_enters_recovery_without_entry_requests(self) -> None:
+        wait = module.InitialStateWait(started_sec=40.0)
+        machine = module.AutoZeroOnlyStateMachine(hold_sec=5.0)
+        armed = self.observation(armed=True)
+
+        self.assertEqual(
+            wait.evaluate(40.01, armed),
+            module.InitialStateWaitResult.UNSAFE_ARMED,
+        )
+        machine.start_recovery("initial_unsafe_armed", 40.01)
+        self.assertEqual(machine.phase, module.AutoPhase.ZERO_EXIT_BURST)
+        self.assertEqual(machine.primary_failure_reason, "initial_unsafe_armed")
         self.assertEqual(machine.offboard_requests, 0)
         self.assertEqual(machine.arm_requests, 0)
         self.assertTrue(
