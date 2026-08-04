@@ -27,7 +27,9 @@ MAX_LINEAR_MPS = 0.05
 MAX_LATERAL_MPS = 0.05
 MAX_MOTION_SEC = 5.0
 PUBLISH_RATE_HZ = 20.0
-STATE_TIMEOUT_SEC = 0.50
+# C2 MAVROS State is measured near 1 Hz; more than two missed periods fails
+# closed without rejecting normal gaps of about 1.04 seconds.
+STATE_TIMEOUT_SEC = 2.0
 ZERO_BURST_SEC = 1.0
 MIN_ZERO_ONLY_HOLD_SEC = 1.0
 MAX_ZERO_ONLY_HOLD_SEC = 60.0

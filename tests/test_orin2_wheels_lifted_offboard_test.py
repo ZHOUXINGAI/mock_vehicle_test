@@ -307,6 +307,49 @@ class WheelsLiftedTest(unittest.TestCase):
             )
         )
 
+    def test_state_just_below_two_seconds_is_fresh(self) -> None:
+        self.assertEqual(module.STATE_TIMEOUT_SEC, 2.0)
+        observation = module.VehicleObservation(
+            state_present=True,
+            state_age_sec=module.STATE_TIMEOUT_SEC - 1e-6,
+            connected=True,
+            armed=False,
+            mode="MANUAL",
+            manual_input=True,
+        )
+        wait = module.InitialStateWait(started_sec=10.0)
+        self.assertEqual(
+            wait.evaluate(10.1, observation),
+            module.InitialStateWaitResult.OBSERVED,
+        )
+
+        machine = module.AutoZeroOnlyStateMachine(hold_sec=5.0)
+        machine.start(10.1)
+        self.assertIsNone(machine.tick(10.1, observation))
+        self.assertEqual(machine.phase, module.AutoPhase.ZERO_PRESTREAM)
+
+    def test_state_above_two_seconds_enters_zero_recovery(self) -> None:
+        observation = module.VehicleObservation(
+            state_present=True,
+            state_age_sec=module.STATE_TIMEOUT_SEC + 1e-6,
+            connected=True,
+            armed=False,
+            mode="MANUAL",
+            manual_input=True,
+        )
+        machine = module.AutoZeroOnlyStateMachine(hold_sec=5.0)
+        machine.start(20.0)
+        self.assertIsNone(machine.tick(20.0, observation))
+        self.assertEqual(machine.phase, module.AutoPhase.ZERO_EXIT_BURST)
+        self.assertEqual(machine.primary_failure_reason, "state_stale")
+        self.assertEqual(machine.offboard_requests, 0)
+        self.assertEqual(machine.arm_requests, 0)
+        self.assertTrue(
+            module.setpoint_is_zero(
+                module.auto_setpoint_for_phase(machine.phase)
+            )
+        )
+
     def test_auto_sequence_requests_offboard_before_single_arm(self) -> None:
         machine = module.AutoZeroOnlyStateMachine(hold_sec=5.0)
         offboard = self.advance_auto_to_arm_request(machine)
