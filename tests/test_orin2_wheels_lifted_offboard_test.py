@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import contextlib
+import io
 from pathlib import Path
 import sys
 import unittest
@@ -117,6 +119,63 @@ class WheelsLiftedTest(unittest.TestCase):
                     module.classify_motion_state(**state),
                     expected,
                 )
+
+    def test_zero_only_duration_is_bounded_and_finite(self) -> None:
+        for value in (-1.0, 0.0, 0.5, 60.01, float("nan"), float("inf")):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                module.validate_zero_only_hold_sec(value)
+        self.assertEqual(module.validate_zero_only_hold_sec(1.0), 1.0)
+        self.assertEqual(module.validate_zero_only_hold_sec(60.0), 60.0)
+
+    def test_zero_only_selects_empty_action_plan(self) -> None:
+        args = module.parse_args(["--zero-only-hold-sec", "12.5"])
+        diagnostic = module.select_diagnostic(args)
+        self.assertIsInstance(diagnostic, module.ZeroOnlyDiagnostic)
+        self.assertEqual(diagnostic.hold_sec, 12.5)
+        self.assertEqual(diagnostic.plan, ())
+
+    def test_zero_only_setpoint_has_no_nonzero_axis(self) -> None:
+        self.assertTrue(module.setpoint_is_zero(module.ZERO_SETPOINT))
+        self.assertEqual(
+            module.ZERO_SETPOINT,
+            module.VelocitySetpoint(
+                linear_x=0.0,
+                linear_y=0.0,
+                linear_z=0.0,
+                angular_x=0.0,
+                angular_y=0.0,
+                angular_z=0.0,
+            ),
+        )
+
+    def test_zero_only_rejects_motion_options(self) -> None:
+        cases = (
+            ["--zero-only-hold-sec", "5", "--forward-only"],
+            ["--zero-only-hold-sec", "5", "--forward-sec", "2"],
+        )
+        for argv in cases:
+            with self.subTest(argv=argv), self.assertRaisesRegex(
+                ValueError, "cannot be combined"
+            ):
+                module.select_diagnostic(module.parse_args(argv))
+
+    def test_zero_only_dry_run_is_explicit(self) -> None:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            result = module.main(["--zero-only-hold-sec", "5"])
+        self.assertEqual(result, 0)
+        rendered = output.getvalue()
+        self.assertIn("ZERO-ONLY DIAGNOSTIC", rendered)
+        self.assertIn("hold_sec=5.000", rendered)
+        self.assertIn("no nonzero setpoint", rendered)
+        self.assertIn("DRY RUN ONLY", rendered)
+
+    def test_forward_only_default_remains_one_second_at_point_zero_five(self) -> None:
+        diagnostic = module.select_diagnostic(module.parse_args(["--forward-only"]))
+        self.assertIsInstance(diagnostic, module.MotionDiagnostic)
+        self.assertEqual(diagnostic.plan[0].name, "forward")
+        self.assertEqual(diagnostic.plan[0].duration_sec, 1.0)
+        self.assertEqual(diagnostic.plan[0].linear_x_mps, 0.05)
 
 
 if __name__ == "__main__":
