@@ -41,6 +41,7 @@ AUTO_RECOVERY_RETRY_SEC = 1.0
 AUTO_RECOVERY_MAX_ATTEMPTS = 3
 AUTO_RECOVERY_TIMEOUT_SEC = 6.0
 AUTO_SERVICE_TIMEOUT_SEC = 2.0
+INITIAL_STATE_WAIT_TIMEOUT_SEC = 5.0
 
 
 @dataclass(frozen=True)
@@ -98,6 +99,32 @@ class VehicleObservation:
     armed: bool
     mode: str
     manual_input: bool
+
+
+class InitialStateWaitResult(str, Enum):
+    WAITING = "WAITING"
+    OBSERVED = "OBSERVED"
+    TIMED_OUT = "TIMED_OUT"
+
+
+@dataclass(frozen=True)
+class InitialStateWait:
+    started_sec: float
+    timeout_sec: float = INITIAL_STATE_WAIT_TIMEOUT_SEC
+
+    def evaluate(
+        self,
+        now_sec: float,
+        observation: VehicleObservation,
+    ) -> InitialStateWaitResult:
+        if (
+            observation.state_present
+            and observation.state_age_sec <= STATE_TIMEOUT_SEC
+        ):
+            return InitialStateWaitResult.OBSERVED
+        if now_sec - self.started_sec >= self.timeout_sec:
+            return InitialStateWaitResult.TIMED_OUT
+        return InitialStateWaitResult.WAITING
 
 
 class AutoPhase(str, Enum):
@@ -199,6 +226,15 @@ class AutoZeroOnlyStateMachine:
             raise RuntimeError("auto zero-only state machine already started")
         self.started = True
         self.phase = AutoPhase.PRECHECK
+        self.phase_started_sec = now_sec
+
+    def start_recovery(self, reason: str, now_sec: float) -> None:
+        if self.started:
+            self.begin_recovery(reason, now_sec)
+            return
+        self.started = True
+        self.primary_failure_reason = reason
+        self.phase = AutoPhase.ZERO_EXIT_BURST
         self.phase_started_sec = now_sec
 
     def _enter(self, phase: AutoPhase, now_sec: float) -> None:
@@ -986,11 +1022,45 @@ def run_live(diagnostic: Diagnostic, namespace: str) -> int:
         )
         machine.service_result(action, accepted, now_sec)
 
+    def wait_for_initial_state(machine: AutoZeroOnlyStateMachine) -> None:
+        wait = InitialStateWait(started_sec=time.monotonic())
+        log_event(
+            "initial_state_wait_start",
+            f"timeout_sec={wait.timeout_sec:.3f}",
+        )
+        while rclpy.ok():
+            node.publish(ZERO_SETPOINT)
+            rclpy.spin_once(node, timeout_sec=0.0)
+            now_sec = time.monotonic()
+            result = wait.evaluate(now_sec, node.observation())
+            if result is InitialStateWaitResult.OBSERVED:
+                log_event(
+                    "initial_state_observed",
+                    node.state_diagnostics(),
+                )
+                machine.start(now_sec)
+                return
+            if result is InitialStateWaitResult.TIMED_OUT:
+                log_event(
+                    "initial_state_wait_timeout",
+                    f"timeout_sec={wait.timeout_sec:.3f} "
+                    f"{node.state_diagnostics()}",
+                )
+                machine.start_recovery("initial_state_timeout", now_sec)
+                return
+            time.sleep(period)
+
+        log_event(
+            "initial_state_wait_aborted",
+            "reason=ros_context_shutdown",
+        )
+        machine.start_recovery("ros_context_shutdown", time.monotonic())
+
     def drive_auto_machine(
         machine: AutoZeroOnlyStateMachine,
     ) -> tuple[int, str]:
         if not machine.started:
-            machine.start(time.monotonic())
+            wait_for_initial_state(machine)
         log_auto_phase(machine)
         while rclpy.ok() and not machine.terminal:
             node.publish(auto_setpoint_for_phase(machine.phase))
@@ -1041,9 +1111,7 @@ def run_live(diagnostic: Diagnostic, namespace: str) -> int:
         machine: AutoZeroOnlyStateMachine,
         reason: str,
     ) -> tuple[int, str]:
-        if not machine.started:
-            machine.start(time.monotonic())
-        machine.begin_recovery(reason, time.monotonic())
+        machine.start_recovery(reason, time.monotonic())
         log_event("auto_recovery_started", f"reason={reason}")
         return drive_auto_machine(machine)
 

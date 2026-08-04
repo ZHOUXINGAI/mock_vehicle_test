@@ -35,6 +35,17 @@ class WheelsLiftedTest(unittest.TestCase):
             manual_input=manual_input,
         )
 
+    @staticmethod
+    def missing_observation():
+        return module.VehicleObservation(
+            state_present=False,
+            state_age_sec=float("inf"),
+            connected=False,
+            armed=False,
+            mode="",
+            manual_input=False,
+        )
+
     def advance_auto_to_arm_request(self, machine):
         manual = self.observation()
         offboard = self.observation(mode="OFFBOARD")
@@ -240,6 +251,61 @@ class WheelsLiftedTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "live output refused"):
             module.require_live_confirmation(args)
+
+    def test_delayed_first_state_starts_precheck_only_after_observation(self) -> None:
+        wait = module.InitialStateWait(started_sec=10.0)
+        machine = module.AutoZeroOnlyStateMachine(hold_sec=5.0)
+        missing = self.missing_observation()
+
+        for now in (10.0, 12.0, 14.99):
+            self.assertEqual(
+                wait.evaluate(now, missing),
+                module.InitialStateWaitResult.WAITING,
+            )
+            self.assertFalse(machine.started)
+            self.assertEqual(machine.offboard_requests, 0)
+            self.assertEqual(machine.arm_requests, 0)
+            self.assertTrue(
+                module.setpoint_is_zero(
+                    module.auto_setpoint_for_phase(module.AutoPhase.PRECHECK)
+                )
+            )
+
+        fresh = self.observation()
+        self.assertEqual(
+            wait.evaluate(14.995, fresh),
+            module.InitialStateWaitResult.OBSERVED,
+        )
+        machine.start(14.995)
+        self.assertIsNone(machine.tick(14.995, fresh))
+        self.assertEqual(machine.phase, module.AutoPhase.ZERO_PRESTREAM)
+        self.assertEqual(machine.offboard_requests, 0)
+        self.assertEqual(machine.arm_requests, 0)
+
+    def test_initial_state_timeout_enters_recovery_without_entry_requests(self) -> None:
+        wait = module.InitialStateWait(started_sec=20.0)
+        machine = module.AutoZeroOnlyStateMachine(hold_sec=5.0)
+        missing = self.missing_observation()
+
+        self.assertEqual(
+            wait.evaluate(24.99, missing),
+            module.InitialStateWaitResult.WAITING,
+        )
+        self.assertEqual(
+            wait.evaluate(25.0, missing),
+            module.InitialStateWaitResult.TIMED_OUT,
+        )
+        self.assertFalse(machine.started)
+        machine.start_recovery("initial_state_timeout", 25.0)
+        self.assertEqual(machine.phase, module.AutoPhase.ZERO_EXIT_BURST)
+        self.assertEqual(machine.primary_failure_reason, "initial_state_timeout")
+        self.assertEqual(machine.offboard_requests, 0)
+        self.assertEqual(machine.arm_requests, 0)
+        self.assertTrue(
+            module.setpoint_is_zero(
+                module.auto_setpoint_for_phase(machine.phase)
+            )
+        )
 
     def test_auto_sequence_requests_offboard_before_single_arm(self) -> None:
         machine = module.AutoZeroOnlyStateMachine(hold_sec=5.0)
