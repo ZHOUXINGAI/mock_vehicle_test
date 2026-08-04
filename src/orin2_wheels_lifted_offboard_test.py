@@ -2,15 +2,18 @@
 
 """Fail-closed, wheels-lifted-only Offboard setpoint smoke test for Orin2.
 
-The program never arms, disarms, changes flight mode, or writes parameters.
-Dry-run is the default and does not import ROS.  Live publishing requires an
-explicit execution flag and an exact physical-safety confirmation phrase.
+Dry-run is the default and does not import ROS.  Manual-entry and motion modes
+never call arming or mode services.  The explicit auto zero-only mode may
+request OFFBOARD, one Arm, Disarm, and MANUAL only after the execution flag and
+exact physical-safety confirmation; it never writes parameters or publishes a
+nonzero setpoint.
 """
 
 from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+from enum import Enum
 import math
 import sys
 import time
@@ -28,6 +31,16 @@ STATE_TIMEOUT_SEC = 0.50
 ZERO_BURST_SEC = 1.0
 MIN_ZERO_ONLY_HOLD_SEC = 1.0
 MAX_ZERO_ONLY_HOLD_SEC = 60.0
+AUTO_ZERO_PRESTREAM_SEC = 2.0
+AUTO_OFFBOARD_RETRY_SEC = 2.0
+AUTO_OFFBOARD_MAX_ATTEMPTS = 3
+AUTO_ENTRY_TIMEOUT_SEC = 10.0
+AUTO_ARM_VERIFY_TIMEOUT_SEC = 2.0
+AUTO_EXIT_BURST_SEC = 1.0
+AUTO_RECOVERY_RETRY_SEC = 1.0
+AUTO_RECOVERY_MAX_ATTEMPTS = 3
+AUTO_RECOVERY_TIMEOUT_SEC = 6.0
+AUTO_SERVICE_TIMEOUT_SEC = 2.0
 
 
 @dataclass(frozen=True)
@@ -65,7 +78,332 @@ class ZeroOnlyDiagnostic:
         return ()
 
 
-Diagnostic = MotionDiagnostic | ZeroOnlyDiagnostic
+@dataclass(frozen=True)
+class AutoZeroOnlyDiagnostic:
+    hold_sec: float
+
+    @property
+    def plan(self) -> tuple[Step, ...]:
+        return ()
+
+
+Diagnostic = MotionDiagnostic | ZeroOnlyDiagnostic | AutoZeroOnlyDiagnostic
+
+
+@dataclass(frozen=True)
+class VehicleObservation:
+    state_present: bool
+    state_age_sec: float
+    connected: bool
+    armed: bool
+    mode: str
+    manual_input: bool
+
+
+class AutoPhase(str, Enum):
+    PRECHECK = "PRECHECK"
+    ZERO_PRESTREAM = "ZERO_PRESTREAM"
+    REQUEST_OFFBOARD = "REQUEST_OFFBOARD"
+    VERIFY_OFFBOARD = "VERIFY_OFFBOARD"
+    REQUEST_ARM_ONCE = "REQUEST_ARM_ONCE"
+    VERIFY_ARMED = "VERIFY_ARMED"
+    ZERO_HOLD = "ZERO_HOLD"
+    ZERO_EXIT_BURST = "ZERO_EXIT_BURST"
+    REQUEST_DISARM = "REQUEST_DISARM"
+    VERIFY_DISARMED = "VERIFY_DISARMED"
+    REQUEST_MANUAL = "REQUEST_MANUAL"
+    VERIFY_MANUAL = "VERIFY_MANUAL"
+    DONE = "DONE"
+    RECOVERY_FAILED = "RECOVERY_FAILED"
+
+
+class ServiceAction(str, Enum):
+    REQUEST_OFFBOARD = "request_offboard"
+    REQUEST_ARM = "request_arm"
+    REQUEST_DISARM = "request_disarm"
+    REQUEST_MANUAL = "request_manual"
+
+
+def auto_setpoint_for_phase(phase: AutoPhase) -> VelocitySetpoint:
+    """Auto zero-only has no phase that is allowed to emit motion."""
+    if not isinstance(phase, AutoPhase):
+        raise ValueError("unknown auto zero-only phase")
+    return ZERO_SETPOINT
+
+
+def auto_precheck_failure(observation: VehicleObservation) -> str | None:
+    if not observation.state_present:
+        return "state_missing"
+    if observation.state_age_sec > STATE_TIMEOUT_SEC:
+        return "state_stale"
+    if not observation.connected:
+        return "disconnected"
+    if observation.armed:
+        return "precheck_already_armed"
+    if observation.mode.upper() != "MANUAL":
+        return "precheck_not_manual"
+    if not observation.manual_input:
+        return "precheck_manual_input_false"
+    return None
+
+
+def active_control_failure(observation: VehicleObservation) -> str | None:
+    if not observation.state_present:
+        return "state_missing"
+    if observation.state_age_sec > STATE_TIMEOUT_SEC:
+        return "state_stale"
+    if not observation.connected:
+        return "disconnected"
+    if not observation.armed:
+        return "unexpected_disarm"
+    if observation.mode.upper() != "OFFBOARD":
+        return "offboard_exit"
+    return None
+
+
+def recovery_is_confirmed(observation: VehicleObservation) -> bool:
+    return bool(
+        observation.state_present
+        and observation.state_age_sec <= STATE_TIMEOUT_SEC
+        and observation.connected
+        and not observation.armed
+        and observation.mode.upper() == "MANUAL"
+    )
+
+
+def statustext_subscription_qos(sensor_data_qos: object) -> object:
+    """Keep STATUSTEXT compatible with MAVROS's best-effort publisher."""
+    return sensor_data_qos
+
+
+@dataclass
+class AutoZeroOnlyStateMachine:
+    hold_sec: float
+    phase: AutoPhase = AutoPhase.PRECHECK
+    phase_started_sec: float = 0.0
+    entry_started_sec: float | None = None
+    last_offboard_request_sec: float = -math.inf
+    offboard_requests: int = 0
+    arm_requests: int = 0
+    disarm_requests: int = 0
+    manual_requests: int = 0
+    primary_failure_reason: str | None = None
+    recovery_failure_reason: str | None = None
+    started: bool = False
+
+    def __post_init__(self) -> None:
+        self.hold_sec = validate_zero_only_hold_sec(self.hold_sec)
+
+    def start(self, now_sec: float) -> None:
+        if self.started:
+            raise RuntimeError("auto zero-only state machine already started")
+        self.started = True
+        self.phase = AutoPhase.PRECHECK
+        self.phase_started_sec = now_sec
+
+    def _enter(self, phase: AutoPhase, now_sec: float) -> None:
+        self.phase = phase
+        self.phase_started_sec = now_sec
+
+    def begin_recovery(self, reason: str | None, now_sec: float) -> None:
+        if reason and self.primary_failure_reason is None:
+            self.primary_failure_reason = reason
+        if self.phase not in {
+            AutoPhase.ZERO_EXIT_BURST,
+            AutoPhase.REQUEST_DISARM,
+            AutoPhase.VERIFY_DISARMED,
+            AutoPhase.REQUEST_MANUAL,
+            AutoPhase.VERIFY_MANUAL,
+            AutoPhase.DONE,
+            AutoPhase.RECOVERY_FAILED,
+        }:
+            self._enter(AutoPhase.ZERO_EXIT_BURST, now_sec)
+
+    def _recovery_failed(self, reason: str, now_sec: float) -> None:
+        self.recovery_failure_reason = reason
+        self._enter(AutoPhase.RECOVERY_FAILED, now_sec)
+
+    def service_result(
+        self,
+        action: ServiceAction,
+        accepted: bool,
+        now_sec: float,
+    ) -> None:
+        if action is ServiceAction.REQUEST_ARM and not accepted:
+            self.begin_recovery("arm_request_rejected_or_failed", now_sec)
+
+    def tick(
+        self,
+        now_sec: float,
+        observation: VehicleObservation,
+    ) -> ServiceAction | None:
+        if not self.started:
+            raise RuntimeError("auto zero-only state machine was not started")
+
+        if self.phase is AutoPhase.PRECHECK:
+            failure = auto_precheck_failure(observation)
+            if failure is not None:
+                self.begin_recovery(failure, now_sec)
+                return None
+            self._enter(AutoPhase.ZERO_PRESTREAM, now_sec)
+            return None
+
+        if self.phase is AutoPhase.ZERO_PRESTREAM:
+            failure = auto_precheck_failure(observation)
+            if failure is not None:
+                self.begin_recovery(failure, now_sec)
+            elif now_sec - self.phase_started_sec >= AUTO_ZERO_PRESTREAM_SEC:
+                self.entry_started_sec = now_sec
+                self._enter(AutoPhase.REQUEST_OFFBOARD, now_sec)
+            return None
+
+        if self.phase is AutoPhase.REQUEST_OFFBOARD:
+            failure = auto_precheck_failure(observation)
+            if failure is not None:
+                self.begin_recovery(failure, now_sec)
+                return None
+            if self.offboard_requests >= AUTO_OFFBOARD_MAX_ATTEMPTS:
+                self.begin_recovery("offboard_not_observed", now_sec)
+                return None
+            self.offboard_requests += 1
+            self.last_offboard_request_sec = now_sec
+            self._enter(AutoPhase.VERIFY_OFFBOARD, now_sec)
+            return ServiceAction.REQUEST_OFFBOARD
+
+        if self.phase is AutoPhase.VERIFY_OFFBOARD:
+            if not observation.state_present:
+                self.begin_recovery("state_missing", now_sec)
+            elif observation.state_age_sec > STATE_TIMEOUT_SEC:
+                self.begin_recovery("state_stale", now_sec)
+            elif not observation.connected:
+                self.begin_recovery("disconnected", now_sec)
+            elif observation.armed:
+                self.begin_recovery("unexpected_arm_before_request", now_sec)
+            elif observation.mode.upper() == "OFFBOARD":
+                self._enter(AutoPhase.REQUEST_ARM_ONCE, now_sec)
+            elif observation.mode.upper() != "MANUAL":
+                self.begin_recovery("unexpected_mode_during_entry", now_sec)
+            elif (
+                self.entry_started_sec is not None
+                and now_sec - self.entry_started_sec >= AUTO_ENTRY_TIMEOUT_SEC
+            ):
+                self.begin_recovery("offboard_entry_timeout", now_sec)
+            elif now_sec - self.last_offboard_request_sec >= AUTO_OFFBOARD_RETRY_SEC:
+                if self.offboard_requests < AUTO_OFFBOARD_MAX_ATTEMPTS:
+                    self._enter(AutoPhase.REQUEST_OFFBOARD, now_sec)
+                else:
+                    self.begin_recovery("offboard_not_observed", now_sec)
+            return None
+
+        if self.phase is AutoPhase.REQUEST_ARM_ONCE:
+            if (
+                not observation.state_present
+                or observation.state_age_sec > STATE_TIMEOUT_SEC
+                or not observation.connected
+                or observation.mode.upper() != "OFFBOARD"
+                or observation.armed
+            ):
+                self.begin_recovery("arm_precondition_lost", now_sec)
+                return None
+            if self.arm_requests != 0:
+                self.begin_recovery("arm_request_invariant_violation", now_sec)
+                return None
+            self.arm_requests = 1
+            self._enter(AutoPhase.VERIFY_ARMED, now_sec)
+            return ServiceAction.REQUEST_ARM
+
+        if self.phase is AutoPhase.VERIFY_ARMED:
+            if not observation.state_present:
+                self.begin_recovery("state_missing", now_sec)
+            elif observation.state_age_sec > STATE_TIMEOUT_SEC:
+                self.begin_recovery("state_stale", now_sec)
+            elif not observation.connected:
+                self.begin_recovery("disconnected", now_sec)
+            elif observation.mode.upper() != "OFFBOARD":
+                self.begin_recovery("offboard_exit", now_sec)
+            elif observation.armed:
+                self._enter(AutoPhase.ZERO_HOLD, now_sec)
+            elif now_sec - self.phase_started_sec >= AUTO_ARM_VERIFY_TIMEOUT_SEC:
+                self.begin_recovery("arm_not_observed_timeout", now_sec)
+            return None
+
+        if self.phase is AutoPhase.ZERO_HOLD:
+            failure = active_control_failure(observation)
+            if failure is not None:
+                self.begin_recovery(failure, now_sec)
+            elif now_sec - self.phase_started_sec >= self.hold_sec:
+                self.begin_recovery(None, now_sec)
+            return None
+
+        if self.phase is AutoPhase.ZERO_EXIT_BURST:
+            if now_sec - self.phase_started_sec >= AUTO_EXIT_BURST_SEC:
+                self._enter(AutoPhase.REQUEST_DISARM, now_sec)
+            return None
+
+        if self.phase is AutoPhase.REQUEST_DISARM:
+            if not observation.state_present or not observation.connected:
+                self._recovery_failed("cannot_confirm_connection_for_disarm", now_sec)
+            elif observation.state_age_sec > STATE_TIMEOUT_SEC:
+                self._recovery_failed("state_stale_during_disarm", now_sec)
+            elif not observation.armed:
+                self._enter(AutoPhase.REQUEST_MANUAL, now_sec)
+            elif self.disarm_requests >= AUTO_RECOVERY_MAX_ATTEMPTS:
+                self._recovery_failed("disarm_not_confirmed", now_sec)
+            else:
+                self.disarm_requests += 1
+                self._enter(AutoPhase.VERIFY_DISARMED, now_sec)
+                return ServiceAction.REQUEST_DISARM
+            return None
+
+        if self.phase is AutoPhase.VERIFY_DISARMED:
+            if (
+                observation.state_present
+                and observation.state_age_sec <= STATE_TIMEOUT_SEC
+                and observation.connected
+                and not observation.armed
+            ):
+                self._enter(AutoPhase.REQUEST_MANUAL, now_sec)
+            elif now_sec - self.phase_started_sec >= AUTO_RECOVERY_TIMEOUT_SEC:
+                self._recovery_failed("disarm_not_confirmed", now_sec)
+            elif now_sec - self.phase_started_sec >= AUTO_RECOVERY_RETRY_SEC:
+                self._enter(AutoPhase.REQUEST_DISARM, now_sec)
+            return None
+
+        if self.phase is AutoPhase.REQUEST_MANUAL:
+            if not observation.state_present or not observation.connected:
+                self._recovery_failed("cannot_confirm_connection_for_manual", now_sec)
+            elif observation.state_age_sec > STATE_TIMEOUT_SEC:
+                self._recovery_failed("state_stale_during_manual", now_sec)
+            elif observation.armed:
+                self._enter(AutoPhase.REQUEST_DISARM, now_sec)
+            elif self.manual_requests >= AUTO_RECOVERY_MAX_ATTEMPTS:
+                self._recovery_failed("manual_not_confirmed", now_sec)
+            else:
+                self.manual_requests += 1
+                self._enter(AutoPhase.VERIFY_MANUAL, now_sec)
+                return ServiceAction.REQUEST_MANUAL
+            return None
+
+        if self.phase is AutoPhase.VERIFY_MANUAL:
+            if recovery_is_confirmed(observation):
+                self._enter(AutoPhase.DONE, now_sec)
+            elif observation.armed:
+                self._enter(AutoPhase.REQUEST_DISARM, now_sec)
+            elif now_sec - self.phase_started_sec >= AUTO_RECOVERY_TIMEOUT_SEC:
+                self._recovery_failed("manual_not_confirmed", now_sec)
+            elif now_sec - self.phase_started_sec >= AUTO_RECOVERY_RETRY_SEC:
+                self._enter(AutoPhase.REQUEST_MANUAL, now_sec)
+            return None
+
+        return None
+
+    @property
+    def terminal(self) -> bool:
+        return self.phase in {AutoPhase.DONE, AutoPhase.RECOVERY_FAILED}
+
+    @property
+    def successful(self) -> bool:
+        return self.phase is AutoPhase.DONE and self.primary_failure_reason is None
 
 
 def build_plan(
@@ -185,6 +523,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="zero-only Offboard diagnostic hold, in seconds (1-60)",
     )
     parser.add_argument(
+        "--auto-enter-offboard",
+        action="store_true",
+        help=(
+            "only with --zero-only-hold-sec: request OFFBOARD, then issue one "
+            "Arm request, and perform verified Disarm+MANUAL recovery"
+        ),
+    )
+    parser.add_argument(
         "--forward-only",
         action="store_true",
         help="run forward/stop only; omit all turn steps",
@@ -193,12 +539,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def select_diagnostic(args: argparse.Namespace) -> Diagnostic:
+    if args.auto_enter_offboard and args.zero_only_hold_sec is None:
+        raise ValueError(
+            "--auto-enter-offboard requires --zero-only-hold-sec"
+        )
     if args.zero_only_hold_sec is not None:
         hold_sec = validate_zero_only_hold_sec(args.zero_only_hold_sec)
         if args.forward_only or args.forward_sec != 1.0:
             raise ValueError(
                 "zero-only diagnostic cannot be combined with motion options"
             )
+        if args.auto_enter_offboard:
+            return AutoZeroOnlyDiagnostic(hold_sec=hold_sec)
         return ZeroOnlyDiagnostic(hold_sec=hold_sec)
 
     plan = build_plan(
@@ -231,10 +583,17 @@ def print_plan(plan: Iterable[Step]) -> None:
 
 
 def print_diagnostic(diagnostic: Diagnostic) -> None:
-    if isinstance(diagnostic, ZeroOnlyDiagnostic):
+    if isinstance(diagnostic, (ZeroOnlyDiagnostic, AutoZeroOnlyDiagnostic)):
         print("ZERO-ONLY DIAGNOSTIC")
         print(f"hold_sec={diagnostic.hold_sec:.3f}")
         print("Action plan is empty; no nonzero setpoint can be published.")
+        if isinstance(diagnostic, AutoZeroOnlyDiagnostic):
+            print(
+                "entry=automatic OFFBOARD request -> one Arm request; "
+                "exit=verified Disarm -> MANUAL"
+            )
+        else:
+            print("entry=human-controlled Arm + OFFBOARD")
         return
     print_plan(diagnostic.plan)
 
@@ -262,8 +621,10 @@ def run_live(diagnostic: Diagnostic, namespace: str) -> int:
         import rclpy
         from geometry_msgs.msg import TwistStamped
         from mavros_msgs.msg import ExtendedState, State, StatusText
+        from mavros_msgs.srv import CommandBool, SetMode
         from rcl_interfaces.srv import GetParameters
         from rclpy.node import Node
+        from rclpy.qos import qos_profile_sensor_data
         from rclpy.signals import SignalHandlerOptions
     except ImportError as exc:
         print(f"ROS/MAVROS imports unavailable: {exc}", file=sys.stderr)
@@ -306,11 +667,20 @@ def run_live(diagnostic: Diagnostic, namespace: str) -> int:
                 StatusText,
                 f"{namespace}/statustext/recv",
                 self.on_statustext,
-                10,
+                statustext_subscription_qos(qos_profile_sensor_data),
             )
             self.frame_client = self.create_client(
                 GetParameters, f"{namespace}/setpoint_velocity/get_parameters"
             )
+            self.arming_client = None
+            self.set_mode_client = None
+            if isinstance(diagnostic, AutoZeroOnlyDiagnostic):
+                self.arming_client = self.create_client(
+                    CommandBool, f"{namespace}/cmd/arming"
+                )
+                self.set_mode_client = self.create_client(
+                    SetMode, f"{namespace}/set_mode"
+                )
 
         def on_state(self, message: State) -> None:
             previous = self.last_state_fields
@@ -393,6 +763,21 @@ def run_live(diagnostic: Diagnostic, namespace: str) -> int:
         def ready_for_motion(self) -> bool:
             return self.motion_failure_reason() is None
 
+        def observation(self) -> VehicleObservation:
+            state_present = self.state is not None
+            return VehicleObservation(
+                state_present=state_present,
+                state_age_sec=(
+                    time.monotonic() - self.state_rx_monotonic
+                    if state_present
+                    else math.inf
+                ),
+                connected=bool(state_present and self.state.connected),
+                armed=bool(state_present and self.state.armed),
+                mode=self.state.mode if state_present else "",
+                manual_input=bool(state_present and self.state.manual_input),
+            )
+
         def publish(self, setpoint: VelocitySetpoint) -> None:
             message = TwistStamped()
             message.header.stamp = self.get_clock().now().to_msg()
@@ -413,7 +798,11 @@ def run_live(diagnostic: Diagnostic, namespace: str) -> int:
     exit_code = 1
     outcome = "unhandled_exception"
     diagnostic_name = (
-        "zero_only" if isinstance(diagnostic, ZeroOnlyDiagnostic) else "motion"
+        "auto_zero_only"
+        if isinstance(diagnostic, AutoZeroOnlyDiagnostic)
+        else "zero_only"
+        if isinstance(diagnostic, ZeroOnlyDiagnostic)
+        else "motion"
     )
     log_event(
         "t_start",
@@ -466,12 +855,221 @@ def run_live(diagnostic: Diagnostic, namespace: str) -> int:
             node.publish(ZERO_SETPOINT)
             time.sleep(period)
 
+    auto_machine = (
+        AutoZeroOnlyStateMachine(diagnostic.hold_sec)
+        if isinstance(diagnostic, AutoZeroOnlyDiagnostic)
+        else None
+    )
+    pending_action = None
+    pending_future = None
+    pending_started_sec = 0.0
+    last_logged_phase = None
+
+    def log_auto_phase(machine: AutoZeroOnlyStateMachine) -> None:
+        nonlocal last_logged_phase
+        if machine.phase is last_logged_phase:
+            return
+        last_logged_phase = machine.phase
+        log_event(
+            "auto_phase",
+            f"phase={machine.phase.value} "
+            f"offboard_requests={machine.offboard_requests} "
+            f"arm_requests={machine.arm_requests} "
+            f"disarm_requests={machine.disarm_requests} "
+            f"manual_requests={machine.manual_requests}",
+        )
+
+    def service_attempt_number(
+        machine: AutoZeroOnlyStateMachine, action: ServiceAction
+    ) -> int:
+        if action is ServiceAction.REQUEST_OFFBOARD:
+            return machine.offboard_requests
+        if action is ServiceAction.REQUEST_ARM:
+            return machine.arm_requests
+        if action is ServiceAction.REQUEST_DISARM:
+            return machine.disarm_requests
+        return machine.manual_requests
+
+    def start_service_request(
+        machine: AutoZeroOnlyStateMachine,
+        action: ServiceAction,
+    ) -> None:
+        nonlocal pending_action, pending_future, pending_started_sec
+        now_sec = time.monotonic()
+        if pending_future is not None:
+            pending_future.cancel()
+            log_event(
+                "service_request_superseded",
+                f"old_action={pending_action.value} new_action={action.value}",
+            )
+            pending_action = None
+            pending_future = None
+
+        if action in {
+            ServiceAction.REQUEST_OFFBOARD,
+            ServiceAction.REQUEST_MANUAL,
+        }:
+            client = node.set_mode_client
+            request = SetMode.Request()
+            request.base_mode = 0
+            request.custom_mode = (
+                "OFFBOARD"
+                if action is ServiceAction.REQUEST_OFFBOARD
+                else "MANUAL"
+            )
+        else:
+            client = node.arming_client
+            request = CommandBool.Request()
+            request.value = action is ServiceAction.REQUEST_ARM
+
+        if client is None or not client.service_is_ready():
+            log_event(
+                "service_request_failed",
+                f"action={action.value} reason=service_not_ready "
+                f"attempt={service_attempt_number(machine, action)}",
+            )
+            machine.service_result(action, False, now_sec)
+            return
+
+        pending_action = action
+        pending_future = client.call_async(request)
+        pending_started_sec = now_sec
+        log_event(
+            "service_request",
+            f"action={action.value} "
+            f"attempt={service_attempt_number(machine, action)}",
+        )
+
+    def poll_service_result(machine: AutoZeroOnlyStateMachine) -> None:
+        nonlocal pending_action, pending_future, pending_started_sec
+        if pending_future is None or pending_action is None:
+            return
+        now_sec = time.monotonic()
+        if not pending_future.done():
+            if now_sec - pending_started_sec < AUTO_SERVICE_TIMEOUT_SEC:
+                return
+            pending_future.cancel()
+            action = pending_action
+            pending_action = None
+            pending_future = None
+            log_event(
+                "service_response",
+                f"action={action.value} accepted=False reason=timeout",
+            )
+            machine.service_result(action, False, now_sec)
+            return
+
+
+        action = pending_action
+        future = pending_future
+        pending_action = None
+        pending_future = None
+        try:
+            response = future.result()
+            accepted = bool(
+                response.mode_sent
+                if action
+                in {
+                    ServiceAction.REQUEST_OFFBOARD,
+                    ServiceAction.REQUEST_MANUAL,
+                }
+                else response.success
+            )
+            result_code = getattr(response, "result", None)
+            details = f"result={result_code!r}"
+        except Exception as exc:
+            accepted = False
+            details = f"exception={exc!r}"
+        log_event(
+            "service_response",
+            f"action={action.value} accepted={accepted} {details}",
+        )
+        machine.service_result(action, accepted, now_sec)
+
+    def drive_auto_machine(
+        machine: AutoZeroOnlyStateMachine,
+    ) -> tuple[int, str]:
+        if not machine.started:
+            machine.start(time.monotonic())
+        log_auto_phase(machine)
+        while rclpy.ok() and not machine.terminal:
+            node.publish(auto_setpoint_for_phase(machine.phase))
+            rclpy.spin_once(node, timeout_sec=0.0)
+            poll_service_result(machine)
+            log_auto_phase(machine)
+            action = machine.tick(time.monotonic(), node.observation())
+            log_auto_phase(machine)
+            if action is not None:
+                start_service_request(machine, action)
+                log_auto_phase(machine)
+            time.sleep(period)
+
+        if pending_future is not None:
+            pending_future.cancel()
+        if not rclpy.ok():
+            print(
+                "AUTO RECOVERY NOT CONFIRMED: ROS context shut down; "
+                "use RC Kill/physical cutoff and verify MANUAL+disarmed.",
+                file=sys.stderr,
+            )
+            return 8, "ros_context_shutdown_recovery_unconfirmed"
+        if machine.phase is AutoPhase.RECOVERY_FAILED:
+            print(
+                "AUTO RECOVERY NOT CONFIRMED: "
+                f"{machine.recovery_failure_reason}; use RC Kill/physical cutoff "
+                "and verify MANUAL+disarmed.",
+                file=sys.stderr,
+            )
+            log_event(
+                "recovery_failed",
+                f"reason={machine.recovery_failure_reason} "
+                f"primary_failure={machine.primary_failure_reason!r} "
+                f"{node.state_diagnostics()}",
+            )
+            return 8, "auto_recovery_unconfirmed"
+        if machine.primary_failure_reason is not None:
+            log_event(
+                "auto_zero_only_failed_recovered",
+                f"reason={machine.primary_failure_reason} "
+                f"{node.state_diagnostics()}",
+            )
+            return 5, machine.primary_failure_reason
+        log_event("auto_zero_only_complete", node.state_diagnostics())
+        return 0, "auto_zero_only_complete"
+
+    def recover_auto_after_exception(
+        machine: AutoZeroOnlyStateMachine,
+        reason: str,
+    ) -> tuple[int, str]:
+        if not machine.started:
+            machine.start(time.monotonic())
+        machine.begin_recovery(reason, time.monotonic())
+        log_event("auto_recovery_started", f"reason={reason}")
+        return drive_auto_machine(machine)
+
     try:
         if not body_ned_is_configured():
             outcome = "body_ned_check_failed"
             exit_code = 6
             log_event("diagnostic_failed", f"reason={outcome}")
+            if auto_machine is not None:
+                recovery_code, recovery_outcome = recover_auto_after_exception(
+                    auto_machine, outcome
+                )
+                if recovery_code == 8:
+                    exit_code = recovery_code
+                    outcome = recovery_outcome
             return exit_code
+
+        if auto_machine is not None:
+            print(
+                "AUTO ZERO-ONLY DIAGNOSTIC: PRECHECK -> 2s zero prestream -> "
+                "OFFBOARD request -> one Arm request -> zero hold -> verified "
+                "Disarm + MANUAL recovery."
+            )
+            exit_code, outcome = drive_auto_machine(auto_machine)
+            return exit_code
+
         print(
             "Publishing zero prestream only; first require "
             "connected+MANUAL+disarmed+manual_input, then wait for "
@@ -573,6 +1171,25 @@ def run_live(diagnostic: Diagnostic, namespace: str) -> int:
         outcome = "keyboard_interrupt"
         exit_code = 130
         log_event("diagnostic_interrupted", f"reason={outcome}")
+        if auto_machine is not None:
+            recovery_code, recovery_outcome = recover_auto_after_exception(
+                auto_machine, outcome
+            )
+            if recovery_code == 8:
+                exit_code = recovery_code
+                outcome = recovery_outcome
+        return exit_code
+    except Exception as exc:
+        outcome = "runtime_exception"
+        exit_code = 7
+        log_event("diagnostic_failed", f"reason={outcome} exception={exc!r}")
+        if auto_machine is not None:
+            recovery_code, recovery_outcome = recover_auto_after_exception(
+                auto_machine, outcome
+            )
+            if recovery_code == 8:
+                exit_code = recovery_code
+                outcome = recovery_outcome
         return exit_code
     finally:
         if rclpy.ok():
