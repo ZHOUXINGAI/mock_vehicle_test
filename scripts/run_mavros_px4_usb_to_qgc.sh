@@ -5,9 +5,6 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 MAVLINK_DEVICE="${MAVLINK_DEVICE:-/dev/serial/by-id/usb-Auterion_PX4_FMU_v6C.x_0-if00}"
-if [ ! -e "$MAVLINK_DEVICE" ] && [ -e /dev/ttyACM0 ]; then
-  MAVLINK_DEVICE=/dev/ttyACM0
-fi
 
 MAVLINK_BAUD="${MAVLINK_BAUD:-115200}"
 MAVROS_NS="${MAVROS_NS:-mavros}"
@@ -33,6 +30,7 @@ fi
 
 if [ ! -e "$MAVLINK_DEVICE" ]; then
   echo "Pixhawk MAVLink device not found: $MAVLINK_DEVICE" >&2
+  echo "Refusing to fall back to /dev/ttyACM*: a different ACM device may be the Arduino." >&2
   exit 1
 fi
 
