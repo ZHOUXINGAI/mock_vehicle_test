@@ -1,5 +1,17 @@
 # Ownership And Interfaces
 
+## Active Ground-Mock Role Map (2026-08-07)
+
+```text
+Orin2 / MAV_SYS_ID=2: Carrier leader, planner and task publisher
+Orin1 / MAV_SYS_ID=1: Mini state source and validated executor
+```
+
+This reverses the earlier two-rover semantic assignment but does not change
+Pair B wiring, MAVLink IDs, the shared ENU frame, or message directions.
+Ground-mock code configures `carrier_vehicle_id=2` and `mini_vehicle_id=1`;
+it must not rewrite physical identities to preserve an obsolete role map.
+
 ## Repo Ownership
 
 ```text

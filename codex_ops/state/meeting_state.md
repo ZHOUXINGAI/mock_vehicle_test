@@ -1,12 +1,29 @@
 # Shared Meeting State
 
-Last updated: 2026-07-27 CST
+Last updated: 2026-08-07 CST
 
 This is the operational shared whiteboard for the rover/docking Codex pair.
 Project-specific docs in each repo still contain details, but this file is the
 first place both agents read for current decisions.
 
 ## Current Boss Decisions
+
+Superseding ground-mock decision from 2026-08-07:
+
+- Orin2 (`/home/seeed`, physical `MAV_SYS_ID=2`) is now the ground Carrier
+  leader and task publisher.
+- Orin1 (physical `MAV_SYS_ID=1`) is now the ground Mini and fixed-wing
+  child-aircraft mock.
+- Pair B wiring and MAVLink system IDs remain unchanged. Docking role is a
+  software role and must not be inferred from system ID.
+- Orin2 receives Orin1 MiniState, runs the ground EasyDocking leader, emits its
+  local Carrier command, and sends CorridorPlan/PlanCommand/Abort to Orin1.
+- The first coordinated motion stage is a 3 m, 0.05 m/s parallel straight plan
+  with Carrier 1.5 m ahead. It follows a no-motion role-reversal link test and
+  independent single-rover qualification.
+
+The older aircraft-role bullets below remain historical context. They are
+superseded for the current two-rover mock where they conflict with this map.
 
 - Carrier/Orin1 is the onboard docking leader.
 - Carrier/Orin1 is the quadrotor carrier/mother aircraft.
