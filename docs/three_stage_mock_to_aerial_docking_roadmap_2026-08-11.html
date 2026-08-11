@@ -1,0 +1,153 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>从双车到双机空中对接的三阶段实施方案</title><style>
+@page { size: A4; margin: 17mm 17mm 18mm 19mm; }
+body { font-family: "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; color: #20252b; font-size: 10.8pt; line-height: 1.62; }
+h1 { color: #173f5f; font-size: 21pt; border-bottom: 2px solid #1f6f9f; padding-bottom: 5pt; margin-top: 16pt; }
+h2 { color: #1f6f9f; font-size: 15pt; margin-top: 14pt; }
+h3 { color: #425466; font-size: 12.5pt; margin-top: 11pt; }
+p { margin: 5pt 0; }
+ul, ol { margin-top: 4pt; margin-bottom: 7pt; }
+li { margin-bottom: 3pt; }
+table { border-collapse: collapse; width: 100%; margin: 9pt 0 13pt 0; font-size: 9.5pt; page-break-inside: avoid; }
+th { background: #1f6f9f; color: white; padding: 6pt; border: 1px solid #c4ccd3; }
+td { padding: 6pt; border: 1px solid #c4ccd3; vertical-align: top; }
+tr:nth-child(even) td { background: #f4f7f9; }
+code { font-family: "Liberation Mono", monospace; background: #eef1f3; padding: 1pt 2pt; }
+pre, .equation { font-family: "Liberation Mono", monospace; background: #f4f6f8; border-left: 4px solid #718096; padding: 9pt; white-space: pre-wrap; }
+.cover { page-break-after: always; text-align: center; padding-top: 47mm; }
+.cover-title { font-size: 29pt; color: #173f5f; font-weight: bold; line-height: 1.32; }
+.cover-subtitle { margin-top: 20pt; font-size: 15pt; color: #59636e; }
+.cover-meta { margin-top: 75pt; font-size: 10.5pt; color: #68727d; line-height: 1.8; }
+.page-break { page-break-before: always; }
+.figure { text-align: center; margin: 10pt 0 13pt 0; page-break-inside: avoid; }
+.figure img { max-width: 100%; }
+.caption { color: #68727d; font-size: 9pt; margin-top: 4pt; }
+.decision { background: #fff8ec; border-left: 5px solid #bd7b00; padding: 10pt 12pt; margin: 9pt 0 13pt 0; }
+.success { background: #eef8f1; border-left: 5px solid #198754; padding: 10pt 12pt; margin: 9pt 0 13pt 0; }
+</style></head><body>
+<div class="cover">
+  <div class="cover-title">从双车到双机空中对接<br>三阶段实施方案</div>
+  <div class="cover-subtitle">双车协同模拟 → 双四轴验证 → 真实固定翼 Mini</div>
+  <div class="cover-meta">项目角色：Orin2 = Carrier / leader；Orin1 = Mini / executor<br>方案日期：2026-08-11<br>用途：项目路线与阶段验收审查</div>
+</div>
+<h1>从双车到双机空中对接的三阶段路线</h1>
+<p>日期：2026-08-11</p>
+<h2 class="page-break">总体阶段</h2>
+<div class="figure"><img src="report_assets/three_stage_roadmap_20260811/three_stage_roadmap.png" width="520"><div class="caption">图 1　三阶段路线及跨阶段保留的软件资产</div></div>
+<h3>第一阶段：双车协同对接模拟</h3>
+<div class="figure"><img src="report_assets/three_stage_roadmap_20260811/stage1_geometry.png" width="520"><div class="caption">图 2　圆周切出、Carrier 平滑接近和共享终端切线走廊</div></div>
+<p>当前角色保持不变：</p>
+<pre>Orin2 / system 2 = Carrier、leader、任务发布方
+Orin1 / system 1 = Mini 执行方，模拟固定翼子机
+Pair B            = 两车运行时协同链路</pre>
+<p>现有实验已经验证了 Offboard、通用轨迹跟踪、共享坐标可视化、Pair B、 分阶段出发和安全恢复，但目前主要还是简单的前后跟随，不能算完成第一阶段。</p>
+<p>第一阶段必须复现 EasyDocking 中真正有意义的协同过程：</p>
+<ol>
+<li>Mini 先进入稳定圆周运动，并完整通过一圈验收。</li>
+<li>Carrier 接收带时间戳的 MiniState，为两车规划未来轨迹。</li>
+<li>规划器选择距离短、可执行的切线解，不倒车、不无故折返、不多绕圈。</li>
+<li>Mini 在收到切出阶段前继续绕圈，到指定相位才沿切线切出。</li>
+<li>Carrier 根据当前航向生成平滑、可执行的接近曲线，进入同一终端切线走廊。</li>
+<li>两车跟踪带时间信息的轨迹，终端阶段 Carrier 始终保持在前。</li>
+<li>必须能看到协同：根据沿程间距和预计到达时间调整速度包络。例如 Mini</li>
+<p>跟不上时，Carrier 在安全范围内降速；持续无法同步则 HOLD/ABORT，而不是 继续盲目追逐。</p>
+</ol>
+<p>规划器发布路径几何、时序和速度边界。Pair B 只传 MiniState、CorridorPlan、 PlanCommand、MissionStatus 和 Abort，不传高频车轮指令。两台车分别使用本地 通用轨迹控制器跟踪自己的规划轨迹。</p>
+<h4>第一阶段执行顺序</h4>
+<ol>
+<li>用 EasyDocking 典型案例做确定性离线复现。</li>
+<li>改变起点、航向、速度滞后、丢包和定位噪声做 Monte Carlo 测试；不可行</li>
+<p>轨迹必须在执行前拒绝。</p>
+<li>Pair B 零运动回放，故意让 Mini 延迟，验证 Carrier 降速、超时和 Abort。</li>
+<li>单独验证 Mini 的一圈加切线切出，以及 Carrier 的航向约束平滑接近。</li>
+<li>以较大终端间距做第一次双车低速协同。</li>
+<li>人为或软件注入一方滞后，证明另一方会调整速度，而不是各跑各的脚本。</li>
+<li>只在定位精度允许时缩短间距；进入近距离对接前使用 RTK。</li>
+</ol>
+<h4>第一阶段验收出口</h4>
+<ul>
+<li>Mini 完整运行一圈后才从圆周切出。</li>
+<li>两车任务由 Carrier 基于同一个 plan ID 和 origin ID 发布。</li>
+<li>路线前向、短、平滑，没有不必要的回环和折返。</li>
+<li>两车进入同一条终端切线走廊，横向误差有界。</li>
+<li>Carrier 始终在前，间距收敛且 Mini 不超车。</li>
+<li>至少一个滞后实验明确引起另一台车速度变化。</li>
+<li>Pair B 断链、状态陈旧、RC Stop、规划不可行和本地跟踪故障都能触发受控</li>
+<p>停止或 Abort。</p>
+<li>完整记录规划/实际轨迹、阶段、速度、间距、报文年龄和退出原因。</li>
+</ul>
+<h3>第二阶段：双四轴，其中一个模拟固定翼 Mini</h3>
+<p>使用速度较快的四轴模拟 Mini，速度较慢的四轴作为 Carrier。目的不是让两台 四轴随意飞，而是在保留悬停和安全中止能力的条件下，把双车架构迁移到三维。</p>
+<p>Mini 模拟机必须通过软件约束表现得像固定翼：</p>
+<ul>
+<li>对接过程中保持正的最小前进速度；</li>
+<li>限制最小转弯半径、加速度、爬升率和姿态/航向角速度；</li>
+<li>不允许用悬停、倒飞或横移来让规划结果“看起来成功”；</li>
+<li>必须有明确的复飞/脱离轨迹。</li>
+</ul>
+<p>将小车 BODY_NED 执行适配层替换为 PX4 四轴轨迹适配层。CorridorPlan 从二维 路径和时间扩展为三维位置、速度、加速度、yaw、走廊半径和有效期。Carrier 继续担任 leader，Pair B 仍然只承担低频状态和规划协同。</p>
+<p>执行顺序：软件仿真、PX4 SITL/HITL、两机独立飞行、大间距协同、终端走廊 飞行，最后才是不接触的近距离接近。</p>
+<h4>第二阶段验收出口</h4>
+<ul>
+<li>同一套阶段状态机在三维中工作，不依赖跨机高频控制总线。</li>
+<li>快四轴全过程遵守固定翼等效约束。</li>
+<li>两机都能进入并保持在同一条三维终端走廊。</li>
+<li>在故意制造速度不匹配时，能看到时序和间距协同。</li>
+<li>缩短间距前，分别验证地理围栏、RC 接管、断链、估计器故障和复飞。</li>
+</ul>
+<h3>第三阶段：真实固定翼 Mini 加 Carrier 四轴</h3>
+<p>只把第二阶段的快四轴替换为真实固定翼 Mini，尽量保持规划接口、Carrier leader、Pair B 安全语义、日志和分级验证流程不变。</p>
+<p>新增的固定翼约束包括：</p>
+<ul>
+<li>考虑空速和风的到达时间预测；</li>
+<li>与 TECS 和固定翼横向控制器兼容的轨迹命令；</li>
+<li>真实最小速度、坡度角、载荷因子、转弯半径、爬升和下滑约束；</li>
+<li>起飞、盘旋、切出、接近、错失进近和复飞状态；</li>
+<li>终端段使用 RTK/视觉相对导航；</li>
+<li>对接接触检测和单独验证的接触后状态转换。</li>
+</ul>
+<p>验证顺序：软件在环、硬件在环、固定翼单机、双机大间距协同、不接触终端 穿越，最后才进入受控对接实验。</p>
+<h4>第三阶段验收出口</h4>
+<ul>
+<li>真实 Mini 在自身飞行包线内跟踪圆周、切线和终端走廊，不依赖四轴特有动作。</li>
+<li>Carrier 的速度和轨迹调节同时满足两机飞行包线。</li>
+<li>相对定位达到终端精度预算。</li>
+<li>断链、坏规划、估计器异常、风扰、迟到和接触异常都有验证过的复飞/中止</li>
+<p>响应。</p>
+</ul>
+<h2 class="page-break">当前立即执行的工作包</h2>
+<p>第一阶段接下来集中完成五项：</p>
+<ol>
+<li>固化动态时空走廊接口和统一评价指标。</li>
+<li>给 Carrier 增加满足初始航向和转弯半径约束的平滑切线接近轨迹。</li>
+<li>增加基于沿程间距和预计到达时间的双车速度协同。</li>
+<li>通过 Pair B 把规划结果接入两端已经验证的通用本地轨迹控制器，仍不传</li>
+<p>高频转向指令。</p>
+<li>下次双车实测前，离线完成正常、Mini 落后、Carrier 落后和断链四种案例。</li>
+</ol>
+<p>第一阶段验收通过前，不开始第二阶段实机实现。</p>
+<h1 class="page-break">审查重点：第一阶段怎样证明“真正协同”</h1>
+<div class="decision"><b>判定原则：</b>两车分别完成预录轨迹不算协同。必须故意制造 Mini 或 Carrier 的进度滞后，并在另一台车的速度包络、实际速度和终端到达时间中看到正确响应。</div>
+<div class="figure"><img src="report_assets/three_stage_roadmap_20260811/stage1_control_layers.png" width="520"><div class="caption">图 3　Carrier 低频规划协调，两车本地高频闭环</div></div>
+<div class="equation">gap = s_carrier - s_mini
+gap_error = gap - desired_gap
+
+Mini 落后：Carrier 在安全包线内降速
+Mini 过近：Carrier 加速或要求 Mini 降速
+长期无法同步：HOLD / ABORT</div>
+<table>
+<tr><th>离线案例</th><th>注入条件</th><th>必须观察到的结果</th></tr>
+<tr><td>Nominal</td><td>速度和链路正常</td><td>一圈后切出，进入同一走廊，间距收敛</td></tr>
+<tr><td>Mini 落后</td><td>降低 Mini 可用速度</td><td>Carrier 有界降速；持续不可达则 Abort</td></tr>
+<tr><td>Carrier 落后</td><td>降低 Carrier 可用速度</td><td>延后 Mini 切出或调整 Mini 速度，禁止超车</td></tr>
+<tr><td>Pair B 陈旧</td><td>停止或延迟报文</td><td>本地 watchdog 触发 HOLD/STOP，不沿用旧命令</td></tr>
+</table>
+<div class="success"><b>建议的下一项开发：</b>先完成纯软件“Mini 落后 → Carrier 自动降速”案例。它最直接地证明系统已从简单跟随升级为协同控制。</div>
+<h1>审查时需要确认的四项决策</h1>
+<table>
+<tr><th>待确认项</th><th>建议基线</th></tr>
+<tr><td>Stage 1 终端目标间距</td><td>普通 GPS 阶段保持大间距，RTK 稳定后再收紧</td></tr>
+<tr><td>速度协同优先级</td><td>优先调 Carrier；Mini 始终满足固定翼等效最小前进速度</td></tr>
+<tr><td>走廊更新方式</td><td>几何计划尽量不变，低频更新阶段和速度包络</td></tr>
+<tr><td>Carrier 平滑接近路线</td><td>比较 biarc 与 clothoid，再按曲率、长度和实现复杂度选择</td></tr>
+</table>
+<p class="small">权威正文来源：docs/three_stage_mock_to_aerial_docking_roadmap_2026_08_11.md</p></body></html>
