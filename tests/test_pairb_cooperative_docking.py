@@ -38,6 +38,8 @@ from src.pairb_cooperative_docking import (
 )
 from scripts.run_pairb_virtual_mini_hil_rviz import (
     align_relative_trace,
+    copy_replay_evidence,
+    create_artifact_run_dir,
     load_replay_bundle,
     mavros_topic,
     pairb_mini_state_safe,
@@ -191,6 +193,20 @@ class PairBContractTests(unittest.TestCase):
 
 
 class ReadOnlyHilReplayTests(unittest.TestCase):
+    def test_hitl_artifact_directory_keeps_compact_replay_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir()
+            (source / "timeline.csv").write_text("header\n", encoding="ascii")
+            (source / "plan.json").write_text("{}\n", encoding="ascii")
+            (source / "summary.json").write_text("{}\n", encoding="ascii")
+            run_dir = create_artifact_run_dir(root / "results", "PAIRB-DUAL")
+            copy_replay_evidence(source, run_dir)
+            self.assertEqual((run_dir / "timeline.csv").read_text(), "header\n")
+            self.assertTrue((run_dir / "plan.json").is_file())
+            self.assertTrue((run_dir / "source_summary.json").is_file())
+
     def test_replay_plan_contains_continuous_orbit_exit_and_tangent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -272,6 +288,8 @@ class ReadOnlyHilReplayTests(unittest.TestCase):
         self.assertNotIn("/mavros/set_mode", source)
         self.assertIn("--require-real-mini", source)
         self.assertIn('f"{role}_vehicle_armed"', source)
+        self.assertIn('"vehicle_commands_sent": 0', source)
+        self.assertIn('"trajectory_xy_4x.gif"', source)
 
     def test_pairb_hil_requires_connected_disarmed_pose(self) -> None:
         health = int(

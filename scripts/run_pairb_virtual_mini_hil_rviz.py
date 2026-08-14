@@ -10,8 +10,11 @@ from __future__ import annotations
 
 import argparse
 import csv
+from datetime import datetime, timezone
 import json
 import math
+import shutil
+import subprocess
 import socket
 import sys
 import time
@@ -40,6 +43,44 @@ PAIRB_HITL_REQUIRED_HEALTH = int(
     | HealthFlag.PX4_CONNECTED
     | HealthFlag.DISARMED
 )
+HITL_TRACE_RATE_HZ = 10.0
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+
+def create_artifact_run_dir(root: Path, mode_label: str) -> Path:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    run_dir = root / f"{stamp}_{mode_label.lower().replace('-', '_')}"
+    run_dir.mkdir(parents=True, exist_ok=False)
+    return run_dir
+
+
+def copy_replay_evidence(replay_dir: Path, run_dir: Path) -> None:
+    for name in ("timeline.csv", "plan.json"):
+        shutil.copy2(replay_dir / name, run_dir / name)
+    source_summary = replay_dir / "summary.json"
+    if source_summary.is_file():
+        shutil.copy2(source_summary, run_dir / "source_summary.json")
+
+
+def current_git_state() -> tuple[str, bool]:
+    commit = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"],
+        check=False,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    dirty = bool(
+        subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "status", "--porcelain"],
+            check=False,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    )
+    return commit or "unknown", dirty
 
 
 @dataclass(frozen=True)
@@ -316,6 +357,7 @@ def parse_args() -> argparse.Namespace:
         help="Carrier-side Pair B Ground CP2102 used for real MiniState HIL input.",
     )
     parser.add_argument("--mini-pairb-baud", type=int, default=115200)
+    parser.add_argument("--ready-timeout-sec", type=float, default=15.0)
     parser.add_argument(
         "--allowed-disarmed-mode",
         action="append",
@@ -331,7 +373,10 @@ def main() -> int:
     args = parse_args()
     if not math.isfinite(args.time_scale) or not 0.1 <= args.time_scale <= 10.0:
         raise SystemExit("--time-scale must be within [0.1, 10]")
-    bundle = load_replay_bundle(Path(args.replay_dir))
+    if not math.isfinite(args.ready_timeout_sec) or not 5.0 <= args.ready_timeout_sec <= 60.0:
+        raise SystemExit("--ready-timeout-sec must be within [5, 60]")
+    replay_dir = Path(args.replay_dir).resolve()
+    bundle = load_replay_bundle(replay_dir)
     mode_label = (
         "PAIRB-DUAL-PIXHAWK"
         if args.require_real_mini and args.mini_pairb_port
@@ -360,6 +405,43 @@ def main() -> int:
     )
     if args.dry_run:
         return 0
+
+    artifact_root = Path(args.artifact_dir)
+    if not artifact_root.is_absolute():
+        artifact_root = REPO_ROOT / artifact_root
+    run_dir = create_artifact_run_dir(artifact_root, mode_label)
+    copy_replay_evidence(replay_dir, run_dir)
+    print(f"HITL_RUN_DIR={run_dir}")
+    trace_handle = (run_dir / "hitl_trace.csv").open(
+        "w", newline="", encoding="ascii"
+    )
+    trace_fields = (
+        "utc",
+        "monotonic_s",
+        "replay_time_s",
+        "mission_phase",
+        "coordination_mode",
+        "carrier_connected",
+        "carrier_armed",
+        "carrier_mode",
+        "carrier_x_m",
+        "carrier_y_m",
+        "carrier_yaw_rad",
+        "mini_seq",
+        "mini_health",
+        "mini_raw_x_m",
+        "mini_raw_y_m",
+        "mini_raw_yaw_rad",
+        "mini_display_x_m",
+        "mini_display_y_m",
+        "mini_display_yaw_rad",
+        "shadow_carrier_x_m",
+        "shadow_carrier_y_m",
+        "shadow_mini_x_m",
+        "shadow_mini_y_m",
+    )
+    trace_writer = csv.DictWriter(trace_handle, fieldnames=trace_fields)
+    trace_writer.writeheader()
 
     import rclpy
     from geometry_msgs.msg import PoseStamped
@@ -395,6 +477,16 @@ def main() -> int:
             self.replay_started = None
             self.index = 0
             self.stopped = False
+            self.finished = False
+            self.outcome = "WAITING"
+            self.stop_reason = ""
+            self.ready_wait_started = time.monotonic()
+            self.completed_monotonic = None
+            self.pairb_states_rx = 0
+            self.pairb_sequence_gaps = 0
+            self.pairb_rejected = 0
+            self.trace_rows = 0
+            self.next_trace_time = 0.0
             self.real_carrier = RvizTrajectoryPublisher(self, "/pairb/real_carrier")
             self.real_mini = RvizTrajectoryPublisher(self, "/pairb/real_mini")
             self.shadow_carrier = RvizTrajectoryPublisher(self, "/pairb/shadow_carrier")
@@ -513,15 +605,21 @@ def main() -> int:
                     try:
                         state = MiniState.decode(frame.payload)
                     except ValueError as exc:
+                        self.pairb_rejected += 1
                         self.get_logger().warning(f"rejected Pair B MiniState: {exc}")
                         continue
                     if self.mini_pairb_last_seq is not None and not sequence_is_newer(
                         state.seq, self.mini_pairb_last_seq
                     ):
+                        self.pairb_rejected += 1
                         continue
+                    if self.mini_pairb_last_seq is not None:
+                        delta = (state.seq - self.mini_pairb_last_seq) & 0xFFFFFFFF
+                        self.pairb_sequence_gaps += max(0, delta - 1)
                     self.mini_pairb_last_seq = state.seq
                     self.mini_pairb_state = state
                     self.mini_pairb_state_rx = now
+                    self.pairb_states_rx += 1
                     self.mini_pose = TracePoint(state.x_m, state.y_m, state.yaw_rad)
                     self.mini_pose_rx = now
 
@@ -587,6 +685,7 @@ def main() -> int:
             self.shadow_carrier.start_actual("map")
             self.virtual_mini.start_actual("map")
             self.replay_started = now
+            self.outcome = "RUNNING"
             self.get_logger().info(
                 "HIL_READY dual_real_health="
                 f"{args.require_real_mini} motion=shadow_only plan=cooperative"
@@ -596,7 +695,57 @@ def main() -> int:
             if self.stopped:
                 return
             self.stopped = True
+            self.finished = True
+            self.outcome = "ABORT"
+            self.stop_reason = reason
+            self.completed_monotonic = time.monotonic()
             self.get_logger().error(f"HIL_STOP reason={reason}; no vehicle command was sent")
+
+        def record_trace(
+            self,
+            now: float,
+            row: ReplayRow,
+            shadow: TracePoint,
+            shadow_mini: TracePoint,
+            aligned_mini: TracePoint | None,
+        ) -> None:
+            if now < self.next_trace_time:
+                return
+            self.next_trace_time = now + 1.0 / HITL_TRACE_RATE_HZ
+            carrier_state = self.carrier_state
+            carrier_pose = self.carrier_pose
+            mini_state = self.mini_pairb_state
+            mini_pose = self.mini_pose
+            trace_writer.writerow(
+                {
+                    "utc": utc_now_iso(),
+                    "monotonic_s": f"{now:.6f}",
+                    "replay_time_s": f"{row.time_s:.3f}",
+                    "mission_phase": row.mission_phase,
+                    "coordination_mode": row.coordination_mode,
+                    "carrier_connected": int(bool(carrier_state and carrier_state.connected)),
+                    "carrier_armed": int(bool(carrier_state and carrier_state.armed)),
+                    "carrier_mode": carrier_state.mode if carrier_state else "",
+                    "carrier_x_m": f"{carrier_pose.x_m:.4f}",
+                    "carrier_y_m": f"{carrier_pose.y_m:.4f}",
+                    "carrier_yaw_rad": f"{carrier_pose.yaw_rad:.5f}",
+                    "mini_seq": mini_state.seq if mini_state else "",
+                    "mini_health": f"0x{mini_state.health:04x}" if mini_state else "",
+                    "mini_raw_x_m": f"{mini_pose.x_m:.4f}" if mini_pose else "",
+                    "mini_raw_y_m": f"{mini_pose.y_m:.4f}" if mini_pose else "",
+                    "mini_raw_yaw_rad": f"{mini_pose.yaw_rad:.5f}" if mini_pose else "",
+                    "mini_display_x_m": f"{aligned_mini.x_m:.4f}" if aligned_mini else "",
+                    "mini_display_y_m": f"{aligned_mini.y_m:.4f}" if aligned_mini else "",
+                    "mini_display_yaw_rad": f"{aligned_mini.yaw_rad:.5f}" if aligned_mini else "",
+                    "shadow_carrier_x_m": f"{shadow.x_m:.4f}",
+                    "shadow_carrier_y_m": f"{shadow.y_m:.4f}",
+                    "shadow_mini_x_m": f"{shadow_mini.x_m:.4f}",
+                    "shadow_mini_y_m": f"{shadow_mini.y_m:.4f}",
+                }
+            )
+            self.trace_rows += 1
+            if self.trace_rows % 20 == 0:
+                trace_handle.flush()
 
         def publish_status(self, row: ReplayRow) -> None:
             marker = Marker()
@@ -647,6 +796,8 @@ def main() -> int:
             if self.replay_started is None:
                 if safe:
                     self.initialize_replay(now)
+                elif now - self.ready_wait_started >= args.ready_timeout_sec:
+                    self.stop(f"ready_timeout:{reason}")
                 return
             if not safe:
                 self.stop(reason)
@@ -658,6 +809,7 @@ def main() -> int:
                 self.carrier_pose.y_m,
                 self.carrier_pose.yaw_rad,
             )
+            aligned_mini = None
             if args.require_real_mini:
                 assert self.mini_sensor_anchor is not None
                 assert self.mini_display_anchor is not None
@@ -689,10 +841,15 @@ def main() -> int:
             )
             self.shadow_carrier.update_actual(shadow.x_m, shadow.y_m, shadow.yaw_rad)
             self.virtual_mini.update_actual(mini.x_m, mini.y_m, mini.yaw_rad)
+            self.record_trace(now, row, shadow, mini, aligned_mini)
             self.publish_status(row)
             if self.index + 1 >= len(self.bundle.rows):
                 self.get_logger().info("HIL_REPLAY_COMPLETE; vehicle remained disarmed")
                 self.stopped = True
+                self.finished = True
+                self.outcome = "COMPLETE"
+                self.stop_reason = "replay_complete"
+                self.completed_monotonic = now
 
         def destroy_node(self) -> bool:
             if self.mini_relay_socket is not None:
@@ -701,17 +858,125 @@ def main() -> int:
                 self.mini_pairb_transport.close()
             return super().destroy_node()
 
-    rclpy.init()
-    node = VirtualMiniHilNode()
+    started_utc = utc_now_iso()
+    started_monotonic = time.monotonic()
+    node = None
+    exit_code = 1
+    runtime_error = ""
     try:
-        rclpy.spin(node)
+        rclpy.init()
+        node = VirtualMiniHilNode()
+        while rclpy.ok() and not node.finished:
+            rclpy.spin_once(node, timeout_sec=0.1)
+        exit_code = 0 if node.outcome == "COMPLETE" else 5
     except KeyboardInterrupt:
-        pass
+        runtime_error = "operator_interrupt"
+        if node is not None:
+            node.outcome = "INTERRUPTED"
+            node.stop_reason = runtime_error
+        exit_code = 130
+    except Exception as exc:
+        runtime_error = f"{type(exc).__name__}:{exc}"
+        if node is not None:
+            node.outcome = "ERROR"
+            node.stop_reason = runtime_error
+        exit_code = 6
     finally:
-        node.destroy_node()
+        if node is not None:
+            node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
-    return 0
+        trace_handle.flush()
+        trace_handle.close()
+
+    commit, dirty = current_git_state()
+    summary = {
+        "schema": 1,
+        "test_type": "read_only_hitl",
+        "mode": mode_label,
+        "outcome": node.outcome if node is not None else "ERROR",
+        "reason": (
+            node.stop_reason if node is not None and node.stop_reason else runtime_error
+        ),
+        "started_utc": started_utc,
+        "finished_utc": utc_now_iso(),
+        "duration_monotonic_sec": round(time.monotonic() - started_monotonic, 3),
+        "git_commit": commit,
+        "git_dirty": dirty,
+        "source_replay_dir": str(replay_dir),
+        "time_scale": args.time_scale,
+        "carrier_namespace": args.carrier_namespace,
+        "mini_source": (
+            f"pairb:{args.mini_pairb_port}"
+            if args.mini_pairb_port
+            else f"udp:{args.mini_relay_port}"
+            if args.mini_relay_port
+            else args.mini_namespace
+        ),
+        "allowed_disarmed_modes": sorted(set(args.allowed_disarmed_mode)),
+        "vehicle_commands_sent": 0,
+        "arm_requests_sent": 0,
+        "mode_requests_sent": 0,
+        "setpoints_sent": 0,
+        "trace_rows": node.trace_rows if node is not None else 0,
+        "replay_final_index": node.index if node is not None else 0,
+        "replay_total_rows": len(bundle.rows),
+        "pairb_states_rx": node.pairb_states_rx if node is not None else 0,
+        "pairb_sequence_gaps": node.pairb_sequence_gaps if node is not None else 0,
+        "pairb_rejected": node.pairb_rejected if node is not None else 0,
+        "carrier_final": {
+            "connected": bool(node and node.carrier_state and node.carrier_state.connected),
+            "armed": bool(node and node.carrier_state and node.carrier_state.armed),
+            "mode": node.carrier_state.mode if node and node.carrier_state else "",
+        },
+        "mini_final": {
+            "seq": node.mini_pairb_last_seq if node is not None else None,
+            "health": (
+                node.mini_pairb_state.health
+                if node is not None and node.mini_pairb_state is not None
+                else None
+            ),
+        },
+    }
+    gif_error = ""
+    try:
+        from scripts.render_pairb_cooperative_xy_gif import render_gif
+
+        gif_summary = render_gif(
+            run_dir,
+            run_dir / "trajectory_xy_4x.gif",
+            speedup=4.0,
+            fps=12.0,
+            max_frames=600,
+            width=900,
+            height=700,
+        )
+        summary["gif"] = gif_summary
+    except Exception as exc:
+        gif_error = f"{type(exc).__name__}:{exc}"
+        summary["gif_error"] = gif_error
+        if exit_code == 0:
+            exit_code = 7
+    (run_dir / "summary.json").write_text(
+        json.dumps(summary, indent=2, sort_keys=True) + "\n",
+        encoding="ascii",
+    )
+    latest = artifact_root / "latest"
+    if latest.is_symlink() or latest.is_file():
+        latest.unlink()
+    if not latest.exists():
+        latest.symlink_to(run_dir.name)
+    print(
+        f"HITL_RESULT outcome={summary['outcome']} reason={summary['reason']} "
+        f"pairb_states_rx={summary['pairb_states_rx']} "
+        f"sequence_gaps={summary['pairb_sequence_gaps']} "
+        f"rejected={summary['pairb_rejected']} run_dir={run_dir}"
+    )
+    if gif_error:
+        print(f"HITL_GIF_FAILED error={gif_error}", file=sys.stderr)
+    else:
+        print(f"HITL_GIF={run_dir / 'trajectory_xy_4x.gif'}")
+    return exit_code
 
 
 if __name__ == "__main__":
