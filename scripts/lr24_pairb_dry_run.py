@@ -6,11 +6,13 @@ Carrier role:
   receive MiniState frames and transmit bounded PlanCommand frames.
 
 Mini role:
-  transmit simulated MiniState frames and receive PlanCommand frames.
+  transmit simulated or read-only MAVROS MiniState frames and receive
+  PlanCommand frames through a no-motion executor.
 
-The current physical topology uses MAVLink 2 TUNNEL on Pair B: Carrier opens
-the LR24 CP2102 directly, while Mini attaches a ROS endpoint to the MAVROS
-router connected to Pixhawk USB. Neither role publishes motor commands.
+Physical transport and docking role are independent.  The parser defaults are
+the original Orin1-Carrier/Orin2-Mini deployment; role-reversal launchers must
+override system IDs and transport explicitly.  Neither role publishes motor
+commands.
 """
 
 from __future__ import annotations
@@ -39,6 +41,8 @@ from lr24_compact_protocol import (  # noqa: E402
     PlanFlag,
     PLAN_SCHEMA_VERSION,
     Role,
+    StagedMissionFlag,
+    StagedMissionPlan,
     corridor_plan_post_tangent_reserve_ms,
     corridor_plan_required_validity_ms,
     describe_frame,
@@ -192,6 +196,25 @@ def make_field_origin(args: argparse.Namespace, seq: int) -> FieldOrigin:
     )
 
 
+def make_staged_mission_plan(args: argparse.Namespace, seq: int) -> StagedMissionPlan:
+    stamp = monotonic_ms()
+    return StagedMissionPlan(
+        schema_version=1,
+        plan_id=args.plan_id,
+        seq=seq,
+        timestamp_ms=stamp,
+        valid_until_ms=(stamp + args.staged_plan_valid_for_ms) & 0xFFFFFFFF,
+        lead_delay_ms=args.staged_lead_delay_ms,
+        lead_distance_m=args.staged_lead_distance_m,
+        lateral_offset_m=args.staged_lateral_offset_m,
+        straight_distance_m=args.staged_straight_distance_m,
+        turn_radius_m=args.staged_turn_radius_m,
+        mini_speed_mps=args.staged_mini_speed_mps,
+        carrier_speed_mps=args.staged_carrier_speed_mps,
+        flags=int(StagedMissionFlag.S_BEND_RETURN),
+    )
+
+
 def print_frame_sizes() -> None:
     print("Compact LR24 frame sizes:")
     for name, size in frame_sizes():
@@ -278,18 +301,26 @@ def carrier_role(args: argparse.Namespace) -> int:
         if args.send_corridor_plan
         else None
     )
+    staged_plan_period = (
+        1.0 / max(0.1, args.staged_plan_rate_hz)
+        if args.send_staged_mission_plan
+        else None
+    )
     field_origin_period = 1.0 / max(0.05, args.field_origin_rate_hz)
     next_command = 0.0
     next_corridor_plan = 0.0
+    next_staged_plan = 0.0
     next_field_origin = 0.0
     command_seq = 0
     corridor_plan_seq = 0
+    staged_plan_seq = 0
     field_origin_seq = 0
     last_state_rx: float | None = None
     last_state_seq: int | None = None
     state_count = 0
     command_count = 0
     corridor_plan_count = 0
+    staged_plan_count = 0
     field_origin_count = 0
     gaps = 0
     csv_bundle = open_csv(
@@ -319,6 +350,14 @@ def carrier_role(args: argparse.Namespace) -> int:
             f"T=({args.rendezvous_x_m:.2f},{args.rendezvous_y_m:.2f}) "
             f"dir=({args.tangent_dir_x:.3f},{args.tangent_dir_y:.3f}) "
             f"rate={args.corridor_plan_rate_hz:.2f}Hz"
+        )
+    if args.send_staged_mission_plan:
+        print(
+            "staged mission plan enabled "
+            f"straight={args.staged_straight_distance_m:.2f}m "
+            f"radius={args.staged_turn_radius_m:.2f}m "
+            f"lead={args.staged_lead_distance_m:.2f}m/"
+            f"{args.staged_lead_delay_ms}ms"
         )
     try:
         while end is None or time.monotonic() < end:
@@ -391,6 +430,22 @@ def carrier_role(args: argparse.Namespace) -> int:
                 corridor_plan_seq += 1
                 next_corridor_plan = now + corridor_plan_period
 
+            if (
+                args.send_staged_mission_plan
+                and staged_plan_period is not None
+                and now >= next_staged_plan
+            ):
+                staged_plan = make_staged_mission_plan(args, staged_plan_seq)
+                write_frame(
+                    transport,
+                    MessageType.STAGED_MISSION_PLAN,
+                    staged_plan.encode(),
+                )
+                staged_plan_count += 1
+                print(f"tx STAGED_MISSION_PLAN seq={staged_plan_seq}")
+                staged_plan_seq += 1
+                next_staged_plan = now + staged_plan_period
+
             if now < next_command:
                 continue
 
@@ -459,7 +514,7 @@ def carrier_role(args: argparse.Namespace) -> int:
     print(
         f"carrier summary states_rx={state_count} state_seq_gaps={gaps} "
         f"commands_tx={command_count} corridor_plans_tx={corridor_plan_count} "
-        f"field_origins_tx={field_origin_count}"
+        f"staged_plans_tx={staged_plan_count} field_origins_tx={field_origin_count}"
     )
     print(format_executor_summary("carrier_local", carrier_follower.executor.counters))
     return dry_run_exit_code(carrier_follower.executor.counters)
@@ -467,19 +522,34 @@ def carrier_role(args: argparse.Namespace) -> int:
 
 def mini_role(args: argparse.Namespace) -> int:
     require_no_motion(args)
+    if not 1 <= args.local_max_plan_ttl_ms <= 180000:
+        raise SystemExit("--local-max-plan-ttl-ms must be within [1, 180000]")
+    if args.state_source == "mavros-local" and args.simulate_orbit:
+        raise SystemExit("--simulate-orbit cannot be used with --state-source mavros-local")
+    live_state_source = None
+    if args.state_source == "mavros-local":
+        from mavros_mini_state_source import MavrosMiniStateSource
+
+        live_state_source = MavrosMiniStateSource(
+            namespace=args.mavros_namespace,
+            sample_timeout_sec=args.state_sample_timeout_sec,
+        )
     transport = open_transport(args)
     reader = FrameReader()
     end = time.monotonic() + args.duration_sec if args.duration_sec > 0 else None
     state_period = 1.0 / max(0.1, args.state_rate_hz)
-    next_state = 0.0
+    next_state = time.monotonic()
     state_seq = 0
     command_count = 0
     corridor_plan_count = 0
+    staged_plan_count = 0
     state_count = 0
     last_command_seq: int | None = None
     last_corridor_plan_seq: int | None = None
+    last_staged_plan_seq: int | None = None
     command_gaps = 0
     corridor_plan_gaps = 0
+    staged_plan_gaps = 0
     rejected_count = 0
     abort_count = 0
     follower = MiniLiveFollower(
@@ -487,12 +557,14 @@ def mini_role(args: argparse.Namespace) -> int:
             max_linear_speed_mps=args.local_max_speed_mps,
             max_yaw_rate_radps=args.local_max_yaw_rate_radps,
             max_accel_mps2=args.local_max_accel_mps2,
+            max_plan_ttl_ms=args.local_max_plan_ttl_ms,
             command_watchdog_ms=args.command_watchdog_ms,
         )
     )
     follower_poll_period_sec = 0.05
     next_follower_poll = 0.0
     last_poll_signature: tuple[str, str] | None = None
+    next_source_status = 0.0
     csv_bundle = open_csv(
         args.csv,
         ["role", "event", "mono_ms", "seq", "phase", "x_m", "y_m", "v_mps", "omega_radps"],
@@ -500,15 +572,32 @@ def mini_role(args: argparse.Namespace) -> int:
 
     print(
         f"mini dry-run transport={transport.description} "
-        f"state_rate={args.state_rate_hz:.1f}Hz simulate_orbit={args.simulate_orbit}"
+        f"state_rate={args.state_rate_hz:.1f}Hz state_source={args.state_source} "
+        f"simulate_orbit={args.simulate_orbit}"
     )
     try:
         while end is None or time.monotonic() < end:
+            if live_state_source is not None:
+                live_state_source.spin_once(0.0)
             now = time.monotonic()
             if now >= next_state:
-                msg = simulated_mini_state(args, state_seq, state_period)
+                if live_state_source is None:
+                    msg = simulated_mini_state(args, state_seq, state_period)
+                else:
+                    msg = live_state_source.build(
+                        args.vehicle_id,
+                        state_seq,
+                        monotonic_ms(),
+                    )
                 write_frame(transport, MessageType.MINI_STATE, msg.encode())
-                print(f"tx MINI_STATE seq={state_seq}")
+                source_status = ""
+                if live_state_source is not None and now >= next_source_status:
+                    source_status = f" {live_state_source.status_text()}"
+                    next_source_status = now + 1.0
+                print(
+                    f"tx MINI_STATE seq={state_seq} health=0x{msg.health:04x} "
+                    f"origin={msg.origin_id}{source_status}"
+                )
                 if csv_bundle:
                     writer, _handle = csv_bundle
                     writer.writerow(
@@ -526,9 +615,10 @@ def mini_role(args: argparse.Namespace) -> int:
                     )
                 state_seq += 1
                 state_count += 1
-                next_state = now + state_period
+                candidate = next_state + state_period
+                next_state = candidate if candidate > now else now + state_period
 
-            for frame in read_frames(transport, reader, 0.02):
+            for frame in read_frames(transport, reader, 0.002):
                 if frame.msg_type == MessageType.FIELD_ORIGIN:
                     outcome = follower.ingest(frame, monotonic_ms())
                     result = outcome.gate_result
@@ -588,6 +678,49 @@ def mini_role(args: argparse.Namespace) -> int:
                             }
                         )
                     continue
+                if frame.msg_type == MessageType.STAGED_MISSION_PLAN:
+                    outcome = follower.ingest(frame, monotonic_ms())
+                    result = outcome.gate_result
+                    try:
+                        plan = StagedMissionPlan.decode(frame.payload)
+                    except (ValueError, struct.error):
+                        print(
+                            f"rx {safe_describe_frame(frame)} "
+                            f"{describe_follower_outcome(outcome)}"
+                        )
+                        rejected_count += 1
+                        continue
+                    if (
+                        last_staged_plan_seq is not None
+                        and plan.seq != last_staged_plan_seq + 1
+                    ):
+                        staged_plan_gaps += max(
+                            0, plan.seq - last_staged_plan_seq - 1
+                        )
+                    last_staged_plan_seq = plan.seq
+                    staged_plan_count += 1
+                    print(
+                        f"rx {safe_describe_frame(frame)} "
+                        f"{describe_follower_outcome(outcome)}"
+                    )
+                    if result.decision.value == "reject":
+                        rejected_count += 1
+                    if csv_bundle:
+                        writer, _handle = csv_bundle
+                        writer.writerow(
+                            {
+                                "role": "mini",
+                                "event": "rx_staged_mission_plan",
+                                "mono_ms": monotonic_ms(),
+                                "seq": plan.seq,
+                                "phase": "STAGED_MISSION_PLAN",
+                                "x_m": "",
+                                "y_m": "",
+                                "v_mps": f"{plan.mini_speed_mps:.3f}",
+                                "omega_radps": "",
+                            }
+                        )
+                    continue
                 if frame.msg_type != MessageType.PLAN_COMMAND:
                     print(f"rx {safe_describe_frame(frame)}")
                     continue
@@ -640,6 +773,8 @@ def mini_role(args: argparse.Namespace) -> int:
                 next_follower_poll = now + follower_poll_period_sec
     finally:
         transport.close()
+        if live_state_source is not None:
+            live_state_source.close()
         if csv_bundle:
             _writer, handle = csv_bundle
             handle.close()
@@ -648,7 +783,9 @@ def mini_role(args: argparse.Namespace) -> int:
     print(
         f"mini summary states_tx={state_count} commands_rx={command_count} "
         f"command_seq_gaps={command_gaps} corridor_plans_rx={corridor_plan_count} "
-        f"corridor_plan_seq_gaps={corridor_plan_gaps} rejected={rejected_count} "
+        f"corridor_plan_seq_gaps={corridor_plan_gaps} "
+        f"staged_plans_rx={staged_plan_count} "
+        f"staged_plan_seq_gaps={staged_plan_gaps} rejected={rejected_count} "
         f"aborts_rx={abort_count}"
     )
     print(format_executor_summary("mini", follower.executor.counters))
@@ -667,7 +804,7 @@ def build_parser() -> argparse.ArgumentParser:
             default="raw-serial",
         )
         p.add_argument("--port")
-        p.add_argument("--baud", type=int, default=57600)
+        p.add_argument("--baud", type=int, default=115200)
         p.add_argument("--source-system", type=int)
         p.add_argument("--target-system", type=int)
         p.add_argument("--source-component", type=int, default=TUNNEL_COMPONENT_ID)
@@ -681,11 +818,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("carrier", help="Carrier leader dry run.")
     add_common(p)
-    p.add_argument("--command-rate-hz", type=float, default=2.0)
+    p.add_argument("--command-rate-hz", type=float, default=10.0)
     p.add_argument("--plan-id", type=int, default=1)
     p.add_argument(
         "--phase",
-        choices=["hold", "orbit", "arc_to_corridor", "terminal", "stop", "abort"],
+        choices=[
+            "hold",
+            "orbit",
+            "arc_to_corridor",
+            "terminal",
+            "stop",
+            "abort",
+            "trajectory",
+        ],
         default="hold",
     )
     p.add_argument("--v-mps", type=float, default=0.0)
@@ -703,7 +848,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--field-origin-rate-hz", type=float, default=0.2)
     p.add_argument("--allow-nonhold-command", action="store_true")
     p.add_argument("--send-corridor-plan", action="store_true")
-    p.add_argument("--corridor-plan-rate-hz", type=float, default=0.2)
+    p.add_argument("--corridor-plan-rate-hz", type=float, default=1.0)
     p.add_argument("--corridor-plan-valid-for-ms", type=int, default=32000)
     p.add_argument("--rendezvous-x-m", type=float, default=-1.5526)
     p.add_argument("--rendezvous-y-m", type=float, default=-4.2237)
@@ -720,6 +865,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--completion-hold-ms", type=int, default=500)
     p.add_argument("--plan-timing-guard-ms", type=int, default=100)
     p.add_argument("--local-command-watchdog-ms", type=int, default=750)
+    p.add_argument("--send-staged-mission-plan", action="store_true")
+    p.add_argument("--staged-plan-rate-hz", type=float, default=1.0)
+    p.add_argument("--staged-plan-valid-for-ms", type=int, default=120000)
+    p.add_argument("--staged-lead-delay-ms", type=int, default=5000)
+    p.add_argument("--staged-lead-distance-m", type=float, default=2.0)
+    p.add_argument("--staged-straight-distance-m", type=float, default=5.0)
+    p.add_argument("--staged-lateral-offset-m", type=float, default=6.0)
+    p.add_argument("--staged-turn-radius-m", type=float, default=3.0)
+    p.add_argument("--staged-mini-speed-mps", type=float, default=0.12)
+    p.add_argument("--staged-carrier-speed-mps", type=float, default=0.06)
     p.set_defaults(
         func=carrier_role,
         transport="mavlink-serial",
@@ -727,15 +882,22 @@ def build_parser() -> argparse.ArgumentParser:
             "/dev/serial/by-id/"
             "usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0"
         ),
-        source_system=1,
-        target_system=2,
-        expected_source_system=2,
+        source_system=2,
+        target_system=1,
+        expected_source_system=1,
     )
 
     p = sub.add_parser("mini", help="Mini endpoint dry run.")
     add_common(p)
-    p.add_argument("--state-rate-hz", type=float, default=10.0)
-    p.add_argument("--vehicle-id", type=int, default=2)
+    p.add_argument("--state-rate-hz", type=float, default=50.0)
+    p.add_argument(
+        "--state-source",
+        choices=["simulated", "mavros-local"],
+        default="simulated",
+    )
+    p.add_argument("--mavros-namespace", default="/mavros")
+    p.add_argument("--state-sample-timeout-sec", type=float, default=2.0)
+    p.add_argument("--vehicle-id", type=int, default=1)
     p.add_argument("--simulate-orbit", action="store_true")
     p.add_argument("--radius-m", type=float, default=4.5)
     p.add_argument("--speed-mps", type=float, default=0.9)
@@ -744,14 +906,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--local-max-speed-mps", type=float, default=1.0)
     p.add_argument("--local-max-yaw-rate-radps", type=float, default=0.6)
     p.add_argument("--local-max-accel-mps2", type=float, default=0.5)
+    p.add_argument("--local-max-plan-ttl-ms", type=int, default=120000)
     p.add_argument("--command-watchdog-ms", type=int, default=750)
     p.set_defaults(
         func=mini_role,
         transport="mavros-router",
         port=None,
-        source_system=2,
-        target_system=1,
-        expected_source_system=1,
+        source_system=1,
+        target_system=2,
+        expected_source_system=2,
     )
 
     return parser

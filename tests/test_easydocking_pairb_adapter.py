@@ -159,7 +159,9 @@ class GroundCorridorAdapterTest(unittest.TestCase):
             )
 
     def test_real_easydocking_ground_plan_integration(self) -> None:
-        easy_src = Path("/home/jetson/easydocking/src")
+        easy_src = Path("/home/seeed/easydocking/src")
+        if not easy_src.is_dir():
+            easy_src = Path("/home/jetson/easydocking/src")
         if not easy_src.is_dir():
             self.skipTest("real EasyDocking source checkout is not available")
         sys.path.insert(0, str(easy_src))

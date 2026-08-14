@@ -363,14 +363,23 @@ MAVLink 2 TUNNEL adds 17 bytes to each current compact frame after payload
 zero truncation:
 
 ```text
-MiniState:       49 bytes x 10 Hz = 490 B/s
-PlanCommand:     54 bytes x  5 Hz = 270 B/s
-CorridorPlan:    83 bytes x 0.2 Hz, plus event send
+MiniState:       49 bytes x 50 Hz = 2450 B/s
+PlanCommand:     54 bytes x 10 Hz =  540 B/s
+MissionStatus:   40 bytes x  5 Hz =  200 B/s
+CorridorPlan:    83 bytes x  1 Hz, plus event send
 FieldOrigin:     48 bytes x 0.2 Hz during setup
 ABORT:           38 bytes x 10 Hz for one second
 ```
 
-Normal mixed traffic remains well below the LR24 low-rate 2.4 KB/s mode.
+Normal mixed traffic is about 3.3 KB/s before heartbeat and PX4 telemetry
+overhead, so this profile requires LR24 HIGH 8 KB/s, UART 115200, and a PX4
+MAVLink stream budget with headroom.  The 2026-08-14 Pair B no-motion test used
+`MAV_0_RATE=6000`.  The first 45-second overlap received 1962 MiniState frames
+with one missing sequence (0.051%); after removing scheduler drift, a 20-second
+overlap received exactly 1000 MiniState frames with no gap.  All reverse-path
+PlanCommand and CorridorPlan frames also arrived without a sequence gap.
+Receivers must still use timestamps and sequence numbers and tolerate an
+isolated dropped state.
 
 ## Safety Boundary
 

@@ -14,16 +14,28 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Mapping
 
-from lr24_compact_protocol import (
-    PLAN_SCHEMA_VERSION,
-    U32_MASK,
-    CorridorPlanCompact,
-    Phase,
-    PlanCommand,
-    PlanFlag,
-    Role,
-    validity_window_ms,
-)
+try:
+    from src.lr24_compact_protocol import (
+        PLAN_SCHEMA_VERSION,
+        U32_MASK,
+        CorridorPlanCompact,
+        Phase,
+        PlanCommand,
+        PlanFlag,
+        Role,
+        validity_window_ms,
+    )
+except ModuleNotFoundError:  # Direct execution with src/ on PYTHONPATH.
+    from lr24_compact_protocol import (
+        PLAN_SCHEMA_VERSION,
+        U32_MASK,
+        CorridorPlanCompact,
+        Phase,
+        PlanCommand,
+        PlanFlag,
+        Role,
+        validity_window_ms,
+    )
 
 
 GROUND_COMMAND_SCHEMA_VERSION = 1

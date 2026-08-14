@@ -13,6 +13,7 @@ try:
     from mavros_msgs.msg import State
     from mavros_msgs.msg import StatusText
     from rcl_interfaces.msg import ParameterDescriptor
+    from rclpy.executors import ExternalShutdownException
     from rclpy.node import Node
     from rclpy.qos import qos_profile_sensor_data
 except ImportError:  # pragma: no cover
@@ -22,6 +23,7 @@ except ImportError:  # pragma: no cover
     State = None
     StatusText = None
     ParameterDescriptor = None
+    ExternalShutdownException = KeyboardInterrupt
     Node = object
     qos_profile_sensor_data = 10
 
@@ -193,7 +195,7 @@ def main() -> None:
     try:
         while rclpy.ok() and not node.done:
             rclpy.spin_once(node, timeout_sec=0.1)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         if rclpy.ok():

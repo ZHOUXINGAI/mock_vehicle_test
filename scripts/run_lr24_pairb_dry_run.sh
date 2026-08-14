@@ -10,20 +10,20 @@ if [ -z "$ROLE" ]; then
 Usage:
   CONFIRM_NO_MOTION=true ./scripts/run_lr24_pairb_dry_run.sh <carrier|mini> [args...]
 
-Mini / Orin2 example (Pixhawk USB MAVROS must already be running):
+Mini / Orin1 example (Pixhawk USB MAVROS must already be running):
   CONFIRM_NO_MOTION=true ./scripts/run_lr24_pairb_dry_run.sh mini \
     --duration-sec 120 \
-    --state-rate-hz 10 \
+    --state-rate-hz 50 \
     --simulate-orbit
 
-Carrier / Orin1 example (Pair B CP2102 path is the built-in default):
+Carrier / Orin2 example (Pair B CP2102 path is the built-in default):
   CONFIRM_NO_MOTION=true ./scripts/run_lr24_pairb_dry_run.sh carrier \
     --duration-sec 120 \
-    --command-rate-hz 2 \
+    --command-rate-hz 10 \
     --phase hold \
     --stale-ms 300 \
     --send-corridor-plan \
-    --corridor-plan-rate-hz 0.2
+    --corridor-plan-rate-hz 1
 
 Legacy direct-radio raw serial requires an explicit override:
   --transport raw-serial --port /dev/serial/by-id/<radio>

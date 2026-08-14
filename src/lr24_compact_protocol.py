@@ -33,6 +33,8 @@ class MessageType(enum.IntEnum):
     ABORT = 3
     CORRIDOR_PLAN = 4
     FIELD_ORIGIN = 5
+    STAGED_MISSION_PLAN = 6
+    MISSION_STATUS = 7
     PING = 10
     PONG = 11
 
@@ -49,6 +51,7 @@ class Phase(enum.IntEnum):
     TERMINAL = 3
     STOP = 4
     ABORT = 5
+    TRAJECTORY = 6
 
 
 class AbortReason(enum.IntEnum):
@@ -70,6 +73,8 @@ class HealthFlag(enum.IntFlag):
     RC_STOP_READY = 1 << 4
     EXECUTOR_READY = 1 << 5
     ORIGIN_VALID = 1 << 6
+    DISARMED = 1 << 7
+    MANUAL_INPUT = 1 << 8
 
 
 class PlanFlag(enum.IntFlag):
@@ -77,11 +82,25 @@ class PlanFlag(enum.IntFlag):
     ONE_ORBIT_COMPLETE = 1 << 1
 
 
+class StagedMissionFlag(enum.IntFlag):
+    S_BEND_RETURN = 1 << 0
+
+
+class MissionExecutionState(enum.IntEnum):
+    WAITING = 0
+    RUNNING = 1
+    COMPLETE = 2
+    FAILED = 3
+    STOPPED = 4
+
+
 MINI_STATE = struct.Struct("<BIIhhhhhhHH")
 PLAN_COMMAND = struct.Struct("<HBBIIIhhHHHHH")
 CORRIDOR_PLAN = struct.Struct("<BHIIIhhhhHHIHHHHHHIHHHHHH")
 ABORT_MESSAGE = struct.Struct("<BBHIIH")
 FIELD_ORIGIN = struct.Struct("<HIIiiiH")
+STAGED_MISSION_PLAN = struct.Struct("<BHIIIHHhHHHHH")
+MISSION_STATUS = struct.Struct("<HBBIIhH")
 PING = struct.Struct("<IQ")
 
 
@@ -362,6 +381,127 @@ class PlanCommand:
             flags=flags,
         )
 
+
+@dataclass(frozen=True)
+class StagedMissionPlan:
+    """Compact parameters for a pre-installed, locally tracked rover route."""
+
+    schema_version: int
+    plan_id: int
+    seq: int
+    timestamp_ms: int
+    valid_until_ms: int
+    lead_delay_ms: int
+    lead_distance_m: float
+    lateral_offset_m: float
+    straight_distance_m: float
+    turn_radius_m: float
+    mini_speed_mps: float
+    carrier_speed_mps: float
+    flags: int = 0
+
+    @property
+    def validity_ms(self) -> int:
+        return validity_window_ms(self.timestamp_ms, self.valid_until_ms)
+
+    def encode(self) -> bytes:
+        for name, value, maximum in (
+            ("schema_version", self.schema_version, 0xFF),
+            ("plan_id", self.plan_id, 0xFFFF),
+            ("seq", self.seq, U32_MASK),
+            ("timestamp_ms", self.timestamp_ms, U32_MASK),
+            ("valid_until_ms", self.valid_until_ms, U32_MASK),
+            ("lead_delay_ms", self.lead_delay_ms, 0xFFFF),
+            ("flags", self.flags, 0xFFFF),
+        ):
+            require_wire_int(name, value, 0, maximum)
+        return STAGED_MISSION_PLAN.pack(
+            self.schema_version,
+            self.plan_id,
+            self.seq,
+            self.timestamp_ms,
+            self.valid_until_ms,
+            self.lead_delay_ms,
+            clamp_int(self.lead_distance_m * 100.0, 0, 0xFFFF),
+            clamp_int(self.lateral_offset_m * 100.0, -32768, 32767),
+            clamp_int(self.straight_distance_m * 100.0, 0, 0xFFFF),
+            clamp_int(self.turn_radius_m * 100.0, 0, 0xFFFF),
+            clamp_int(self.mini_speed_mps * 100.0, 0, 0xFFFF),
+            clamp_int(self.carrier_speed_mps * 100.0, 0, 0xFFFF),
+            self.flags,
+        )
+
+    @staticmethod
+    def decode(payload: bytes) -> "StagedMissionPlan":
+        (
+            schema_version,
+            plan_id,
+            seq,
+            timestamp_ms,
+            valid_until_ms,
+            lead_delay_ms,
+            lead_distance_cm,
+            lateral_offset_cm,
+            straight_distance_cm,
+            turn_radius_cm,
+            mini_speed_cms,
+            carrier_speed_cms,
+            flags,
+        ) = STAGED_MISSION_PLAN.unpack(payload)
+        return StagedMissionPlan(
+            schema_version=schema_version,
+            plan_id=plan_id,
+            seq=seq,
+            timestamp_ms=timestamp_ms,
+            valid_until_ms=valid_until_ms,
+            lead_delay_ms=lead_delay_ms,
+            lead_distance_m=lead_distance_cm / 100.0,
+            lateral_offset_m=lateral_offset_cm / 100.0,
+            straight_distance_m=straight_distance_cm / 100.0,
+            turn_radius_m=turn_radius_cm / 100.0,
+            mini_speed_mps=mini_speed_cms / 100.0,
+            carrier_speed_mps=carrier_speed_cms / 100.0,
+            flags=flags,
+        )
+
+
+@dataclass(frozen=True)
+class MissionStatus:
+    """Sticky local worker state reported independently of MAVROS freshness."""
+
+    plan_id: int
+    role: Role
+    state: MissionExecutionState
+    seq: int
+    timestamp_ms: int
+    exit_code: int = 0
+    flags: int = 0
+
+    def encode(self) -> bytes:
+        return MISSION_STATUS.pack(
+            require_wire_int("plan_id", self.plan_id, 1, 0xFFFF),
+            require_wire_int("role", int(self.role), 1, 0xFF),
+            require_wire_int("state", int(self.state), 0, 0xFF),
+            require_wire_int("seq", self.seq, 0, U32_MASK),
+            require_wire_int("timestamp_ms", self.timestamp_ms, 0, U32_MASK),
+            require_wire_int("exit_code", self.exit_code, -32768, 32767),
+            require_wire_int("flags", self.flags, 0, 0xFFFF),
+        )
+
+    @staticmethod
+    def decode(payload: bytes) -> "MissionStatus":
+        plan_id, role, state, seq, timestamp_ms, exit_code, flags = (
+            MISSION_STATUS.unpack(payload)
+        )
+        return MissionStatus(
+            plan_id=plan_id,
+            role=Role(role),
+            state=MissionExecutionState(state),
+            seq=seq,
+            timestamp_ms=timestamp_ms,
+            exit_code=exit_code,
+            flags=flags,
+        )
 
 @dataclass(frozen=True)
 class CorridorPlanCompact:
@@ -667,6 +807,21 @@ def describe_frame(frame: Frame) -> str:
             f"mini_v={msg.mini_speed_mps:.2f} carrier_max={msg.carrier_max_speed_mps:.2f} "
             f"origin={msg.origin_id}"
         )
+    if frame.msg_type == MessageType.STAGED_MISSION_PLAN:
+        msg = StagedMissionPlan.decode(frame.payload)
+        return (
+            f"STAGED_MISSION_PLAN schema={msg.schema_version} seq={msg.seq} "
+            f"plan={msg.plan_id} lead={msg.lead_distance_m:.2f}m/"
+            f"{msg.lead_delay_ms}ms straight={msg.straight_distance_m:.2f}m "
+            f"radius={msg.turn_radius_m:.2f}m mini_v={msg.mini_speed_mps:.2f} "
+            f"carrier_v={msg.carrier_speed_mps:.2f}"
+        )
+    if frame.msg_type == MessageType.MISSION_STATUS:
+        msg = MissionStatus.decode(frame.payload)
+        return (
+            f"MISSION_STATUS seq={msg.seq} plan={msg.plan_id} "
+            f"role={msg.role.name} state={msg.state.name} exit={msg.exit_code}"
+        )
     if frame.msg_type == MessageType.ABORT:
         msg = Abort.decode(frame.payload)
         return (
@@ -697,6 +852,10 @@ def frame_sizes() -> Iterable[tuple[str, int]]:
     yield "abort_frame", HEADER.size + ABORT_MESSAGE.size + CRC.size
     yield "field_origin_payload", FIELD_ORIGIN.size
     yield "field_origin_frame", HEADER.size + FIELD_ORIGIN.size + CRC.size
+    yield "staged_mission_plan_payload", STAGED_MISSION_PLAN.size
+    yield "staged_mission_plan_frame", HEADER.size + STAGED_MISSION_PLAN.size + CRC.size
+    yield "mission_status_payload", MISSION_STATUS.size
+    yield "mission_status_frame", HEADER.size + MISSION_STATUS.size + CRC.size
     yield "ping_payload", PING.size
     yield "ping_frame", HEADER.size + PING.size + CRC.size
 
@@ -708,6 +867,8 @@ def expected_payload_size(msg_type: MessageType) -> int:
         MessageType.ABORT: ABORT_MESSAGE.size,
         MessageType.CORRIDOR_PLAN: CORRIDOR_PLAN.size,
         MessageType.FIELD_ORIGIN: FIELD_ORIGIN.size,
+        MessageType.STAGED_MISSION_PLAN: STAGED_MISSION_PLAN.size,
+        MessageType.MISSION_STATUS: MISSION_STATUS.size,
         MessageType.PING: PING.size,
         MessageType.PONG: PING.size,
     }

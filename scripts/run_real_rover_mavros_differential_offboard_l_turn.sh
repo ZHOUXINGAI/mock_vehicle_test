@@ -56,8 +56,10 @@ CONFIRM_PHYSICAL_POWER_CUTOFF_READY="${CONFIRM_PHYSICAL_POWER_CUTOFF_READY:-fals
 CONFIRM_REAL_LOCAL_POSITION="${CONFIRM_REAL_LOCAL_POSITION:-false}"
 CONFIRM_CURRENT_DIFF_MAPPING="${CONFIRM_CURRENT_DIFF_MAPPING:-false}"
 CONFIRM_WHEELS_INSTALLED="${CONFIRM_WHEELS_INSTALLED:-false}"
+CONFIRM_FRESH_USER_START="${CONFIRM_FRESH_USER_START:-false}"
 
 SETPOINT_VELOCITY_MAV_FRAME="${SETPOINT_VELOCITY_MAV_FRAME:-BODY_NED}"
+PRESTART_FIRST_MOTION_SETPOINT="${PRESTART_FIRST_MOTION_SETPOINT:-false}"
 FIRST_DISTANCE_M="${FIRST_DISTANCE_M:-3.0}"
 SECOND_DISTANCE_M="${SECOND_DISTANCE_M:-3.0}"
 LINEAR_SPEED_MPS="${LINEAR_SPEED_MPS:-0.12}"
@@ -66,12 +68,18 @@ TURN_DIRECTION_SIGN="${TURN_DIRECTION_SIGN:--1.0}"
 TURN_LATERAL_SPEED_MPS="${TURN_LATERAL_SPEED_MPS:-0.10}"
 TURN_FORWARD_SPEED_MPS="${TURN_FORWARD_SPEED_MPS:-0.0}"
 YAW_TOLERANCE_DEG="${YAW_TOLERANCE_DEG:-12.0}"
+TURN_COMPLETION_HOLD_SEC="${TURN_COMPLETION_HOLD_SEC:-0.0}"
 DISTANCE_TOLERANCE_M="${DISTANCE_TOLERANCE_M:-0.12}"
 FIRST_LEG_MAX_SEC="${FIRST_LEG_MAX_SEC:-35.0}"
 TURN_MAX_SEC="${TURN_MAX_SEC:-12.0}"
 SECOND_LEG_MAX_SEC="${SECOND_LEG_MAX_SEC:-35.0}"
 MAX_LINEAR_SPEED_MPS="${MAX_LINEAR_SPEED_MPS:-0.20}"
 MAX_WAIT_FOR_READY_SEC="${MAX_WAIT_FOR_READY_SEC:-60}"
+
+case "$TURN_DIRECTION_SIGN" in
+  -*) TURN_LABEL="left" ;;
+  *) TURN_LABEL="right" ;;
+esac
 
 missing=()
 for item in \
@@ -84,7 +92,8 @@ for item in \
   CONFIRM_PHYSICAL_POWER_CUTOFF_READY \
   CONFIRM_REAL_LOCAL_POSITION \
   CONFIRM_CURRENT_DIFF_MAPPING \
-  CONFIRM_WHEELS_INSTALLED
+  CONFIRM_WHEELS_INSTALLED \
+  CONFIRM_FRESH_USER_START
 do
   if [ "${!item}" != "true" ]; then
     missing+=("$item=true")
@@ -98,6 +107,10 @@ if [ "${#missing[@]}" -gt 0 ]; then
     for item in "${missing[@]}"; do
       echo "  $item"
     done
+    echo
+    echo "CONFIRM_FRESH_USER_START means the user gave a fresh start command for this exact run"
+    echo "after checking HDMI/display/USB/power cables, field clearance, RC kill, QGC disarm,"
+    echo "physical cutoff, PX4 safe state, and neutral outputs. Do not reuse an old confirmation."
   } >&2
   exit 2
 fi
@@ -181,17 +194,19 @@ Effective L-turn settings:
   SECOND_DISTANCE_M=$SECOND_DISTANCE_M
   LINEAR_SPEED_MPS=$LINEAR_SPEED_MPS
   TURN_ANGLE_DEG=$TURN_ANGLE_DEG
-  TURN_DIRECTION_SIGN=$TURN_DIRECTION_SIGN (-1 means left on this PX4/MAVROS BODY_NED setup)
+  TURN_DIRECTION_SIGN=$TURN_DIRECTION_SIGN (-1 means left, +1 means right on this PX4/MAVROS BODY_NED setup)
   TURN_LATERAL_SPEED_MPS=$TURN_LATERAL_SPEED_MPS
   TURN_FORWARD_SPEED_MPS=$TURN_FORWARD_SPEED_MPS
   YAW_TOLERANCE_DEG=$YAW_TOLERANCE_DEG
+  TURN_COMPLETION_HOLD_SEC=$TURN_COMPLETION_HOLD_SEC
   FIRST_LEG_MAX_SEC=$FIRST_LEG_MAX_SEC
   TURN_MAX_SEC=$TURN_MAX_SEC
   SECOND_LEG_MAX_SEC=$SECOND_LEG_MAX_SEC
   SETPOINT_VELOCITY_MAV_FRAME=$SETPOINT_VELOCITY_MAV_FRAME
+  PRESTART_FIRST_MOTION_SETPOINT=$PRESTART_FIRST_MOTION_SETPOINT
   ARM_ON_START=${ARM_ON_START:-true}
 
-Expected path: forward ${FIRST_DISTANCE_M}m, arc/turn left toward a
+Expected path: forward ${FIRST_DISTANCE_M}m, arc/turn ${TURN_LABEL} toward a
 ${TURN_ANGLE_DEG}-degree heading change, then forward ${SECOND_DISTANCE_M}m.
 EOF
 
@@ -204,6 +219,7 @@ python3 "$REPO_DIR/src/real_rover_mavros_offboard_l_turn.py" \
   -p command_rate_hz:="${COMMAND_RATE_HZ:-20}" \
   -p publish_unstamped_cmd_vel:="${PUBLISH_UNSTAMPED_CMD_VEL:-true}" \
   -p warmup_sec:="${WARMUP_SEC:-2.0}" \
+  -p prestart_first_motion_setpoint:="$PRESTART_FIRST_MOTION_SETPOINT" \
   -p initial_stop_sec:="${INITIAL_STOP_SEC:-0.5}" \
   -p stop_after_first_sec:="${STOP_AFTER_FIRST_SEC:-0.3}" \
   -p stop_after_turn_sec:="${STOP_AFTER_TURN_SEC:-0.3}" \
@@ -216,6 +232,7 @@ python3 "$REPO_DIR/src/real_rover_mavros_offboard_l_turn.py" \
   -p turn_lateral_speed_mps:="$TURN_LATERAL_SPEED_MPS" \
   -p turn_forward_speed_mps:="$TURN_FORWARD_SPEED_MPS" \
   -p yaw_tolerance_deg:="$YAW_TOLERANCE_DEG" \
+  -p turn_completion_hold_sec:="$TURN_COMPLETION_HOLD_SEC" \
   -p distance_tolerance_m:="$DISTANCE_TOLERANCE_M" \
   -p first_leg_max_sec:="$FIRST_LEG_MAX_SEC" \
   -p turn_max_sec:="$TURN_MAX_SEC" \

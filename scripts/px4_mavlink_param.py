@@ -17,6 +17,26 @@ from pymavlink import mavutil
 DEFAULT_DEVICE = "/dev/serial/by-id/usb-Auterion_PX4_FMU_v6C.x_0-if00"
 
 
+def patch_pymavlink_instance_cache() -> None:
+    """Work around pymavlink 2.4.49 leaving instance caches as None."""
+
+    if getattr(mavutil.add_message, "_instance_cache_safe", False):
+        return
+    original_add_message = mavutil.add_message
+
+    def safe_add_message(messages: dict, mtype: str, msg: object) -> None:
+        existing = messages.get(mtype)
+        if existing is not None and getattr(existing, "_instances", None) is None:
+            existing._instances = {}
+        original_add_message(messages, mtype, msg)
+
+    safe_add_message._instance_cache_safe = True
+    mavutil.add_message = safe_add_message
+
+
+patch_pymavlink_instance_cache()
+
+
 INT_TYPES = {
     mavutil.mavlink.MAV_PARAM_TYPE_UINT8: (">xxxB", int),
     mavutil.mavlink.MAV_PARAM_TYPE_INT8: (">xxxb", int),
@@ -183,6 +203,9 @@ def main() -> int:
         source_system=args.source_system,
         autoreconnect=False,
     )
+    # mavlink_connection() may select a dialect and replace add_message after
+    # module import, so reinstall the cache guard against the active function.
+    patch_pymavlink_instance_cache()
     heartbeat = master.wait_heartbeat(timeout=args.heartbeat_timeout)
     if heartbeat is None:
         raise TimeoutError("no Pixhawk heartbeat")

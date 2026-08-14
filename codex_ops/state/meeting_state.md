@@ -1,6 +1,6 @@
 # Shared Meeting State
 
-Last updated: 2026-08-07 CST
+Last updated: 2026-08-11 CST
 
 This is the operational shared whiteboard for the rover/docking Codex pair.
 Project-specific docs in each repo still contain details, but this file is the
@@ -8,7 +8,39 @@ first place both agents read for current decisions.
 
 ## Current Boss Decisions
 
-Superseding ground-mock decision from 2026-08-07:
+Superseding program sequence from 2026-08-11:
+
+1. Complete the two-rover cooperative docking mock. Simple staged following is
+   not completion. The exit demonstration must reproduce the EasyDocking-style
+   stable Mini orbit, short smooth tangent solution, shared dynamic space-time
+   corridor, Carrier-issued tasks, and observable speed cooperation when one
+   vehicle falls behind.
+2. Move to two quadrotors: a fast quadrotor constrained to emulate the
+   fixed-wing Mini and a slower quadrotor acting as Carrier.
+3. Replace the fast Mini-emulator quadrotor with the real fixed-wing Mini while
+   retaining the Carrier quadrotor.
+
+The detailed roadmap is
+`docs/three_stage_mock_to_aerial_docking_roadmap_2026_08_11.md`.
+
+Speed-envelope decision from 2026-08-11:
+
+- Mini and Carrier must be planned with distinct speed/acceleration envelopes;
+  the planner must reject a mission when their terminal speed ranges do not
+  overlap.
+- Aerial design target: Mini `10--20 m/s`, Carrier `0--12 m/s`, terminal
+  overlap `10--12 m/s`. Rover analogue: Mini `0.12--0.20 m/s`, Carrier
+  `0--0.16 m/s`, initial rendezvous speed `0.14 m/s`.
+- Carrier may start early and occupy the terminal corridor ahead. Mini must
+  complete the qualified orbit, cut out at the commanded phase, and decelerate
+  to the jointly selected rendezvous speed.
+- Terminal acceptance requires a sustained relative-state capture window, not
+  a one-sample position coincidence. Relative speed, along/cross-track error,
+  heading, yaw rate, and the Carrier-ahead invariant are all checked.
+- Detailed rationale and scaled values are recorded in
+  `docs/three_stage_mock_to_aerial_docking_roadmap_2026_08_11.md`.
+
+Superseding ground-mock role decision from 2026-08-07:
 
 - Orin2 (`/home/seeed`, physical `MAV_SYS_ID=2`) is now the ground Carrier
   leader and task publisher.

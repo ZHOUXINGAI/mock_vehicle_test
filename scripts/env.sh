@@ -5,6 +5,11 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export MOCK_VEHICLE_REPO_DIR="$REPO_DIR"
 
+# Both rovers intentionally use the same ROS topic names. Keep DDS host-local
+# so a LAN connection cannot mix Orin1 and Orin2 MAVROS telemetry. Runtime
+# vehicle coordination belongs on Pair B, not cross-host ROS discovery.
+export ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-1}"
+
 source_ros_setup() {
   local setup_file="$1"
   if [ -z "$setup_file" ] || [ ! -f "$setup_file" ]; then

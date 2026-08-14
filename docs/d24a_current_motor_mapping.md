@@ -1,21 +1,21 @@
 # D24A Four-Wheel Current Motor Mapping
 
-Last updated: 2026-06-11
+Last updated: 2026-06-22
 
-This file records the raw D24A channel calibration for the Orin Nano four-wheel
-rover. Keep wheels lifted during calibration.
+This file records the raw D24A channel calibration for the Lubancat/Orin Nano
+four-wheel rover hardware. Keep wheels lifted during calibration.
 
 ## Raw Calibration Results
 
 ```text
-A forward  = right-front wheel backward
-A backward = right-front wheel forward
-B forward  = left-front wheel backward
-B backward = left-front wheel forward
-C forward  = left-rear wheel forward
-C backward = left-rear wheel backward
-D forward  = right-rear wheel forward
-D backward = right-rear wheel backward
+A forward  = left-rear wheel forward
+A backward = left-rear wheel backward
+B forward  = right-front wheel forward
+B backward = right-front wheel backward
+C forward  = right-rear wheel backward
+C backward = right-rear wheel forward
+D forward  = left-front wheel backward
+D backward = left-front wheel forward
 ```
 
 ## Derived Physical Commands
@@ -28,24 +28,24 @@ The Arduino serial bridge uses signed raw commands:
 Physical wheel mapping:
 
 ```text
-right-front forward = A backward = -A
-right-front backward = A forward = +A
+right-front forward = B forward = +B
+right-front backward = B backward = -B
 
-left-front forward = B backward = -B
-left-front backward = B forward = +B
+left-front forward = D backward = -D
+left-front backward = D forward = +D
 
-left-rear forward = C forward = +C
-left-rear backward = C backward = -C
+left-rear forward = A forward = +A
+left-rear backward = A backward = -A
 
-right-rear forward = D forward = +D
-right-rear backward = D backward = -D
+right-rear forward = C backward = -C
+right-rear backward = C forward = +C
 ```
 
 High-level rover commands:
 
 ```text
-forward  = A:-pwm  B:-pwm  C:+pwm  D:+pwm
-backward = A:+pwm  B:+pwm  C:-pwm  D:-pwm
+forward  = A:+pwm  B:+pwm  C:-pwm  D:-pwm
+backward = A:-pwm  B:-pwm  C:+pwm  D:+pwm
 left     = A:-pwm  B:+pwm  C:-pwm  D:+pwm
 right    = A:+pwm  B:-pwm  C:+pwm  D:-pwm
 ```

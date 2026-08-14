@@ -22,14 +22,14 @@
 //   S              stop
 //
 // Current physical calibration:
-//   A forward  -> right-front backward
-//   A backward -> right-front forward
-//   B forward  -> left-front backward
-//   B backward -> left-front forward
-//   C forward  -> left-rear forward
-//   C backward -> left-rear backward
-//   D forward  -> right-rear forward
-//   D backward -> right-rear backward
+//   A forward  -> left-rear forward
+//   A backward -> left-rear backward
+//   B forward  -> right-front forward
+//   B backward -> right-front backward
+//   C forward  -> right-rear backward
+//   C backward -> right-rear forward
+//   D forward  -> left-front backward
+//   D backward -> left-front forward
 
 struct MotorPins {
   uint8_t pwm;
@@ -45,7 +45,7 @@ const uint8_t STBY_PIN = A2;
 
 const int DEFAULT_PWM = 120;
 const unsigned long DEFAULT_DURATION_MS = 700;
-const unsigned long MAX_DURATION_MS = 3000;
+const unsigned long MAX_DURATION_MS = 5000;
 const unsigned long WATCHDOG_MS = 700;
 
 unsigned long stopAtMs = 0;
@@ -111,15 +111,15 @@ void driveHighLevel(const char *cmd, int pwm) {
   int d = 0;
 
   if (strcmp(cmd, "F") == 0) {
-    a = -pwm;
-    b = -pwm;
-    c = pwm;
-    d = pwm;
-  } else if (strcmp(cmd, "B") == 0) {
     a = pwm;
     b = pwm;
     c = -pwm;
     d = -pwm;
+  } else if (strcmp(cmd, "B") == 0) {
+    a = -pwm;
+    b = -pwm;
+    c = pwm;
+    d = pwm;
   } else if (strcmp(cmd, "L") == 0) {
     a = -pwm;
     b = pwm;

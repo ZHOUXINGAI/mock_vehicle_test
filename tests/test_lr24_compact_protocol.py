@@ -25,6 +25,8 @@ from lr24_compact_protocol import (
     FrameReader,
     HealthFlag,
     MessageType,
+    MissionExecutionState,
+    MissionStatus,
     MiniState,
     Phase,
     PlanCommand,
@@ -148,6 +150,67 @@ class CompactProtocolTest(unittest.TestCase):
         self.assertEqual(sizes["corridor_plan_frame"], 66)
         self.assertEqual(sizes["abort_frame"], 21)
         self.assertEqual(sizes["field_origin_frame"], 31)
+        self.assertEqual(sizes["mission_status_frame"], 23)
+
+    def test_mission_status_round_trip_and_strict_ranges(self):
+        status = MissionStatus(
+            plan_id=9,
+            role=Role.MINI,
+            state=MissionExecutionState.COMPLETE,
+            seq=4,
+            timestamp_ms=1234,
+            exit_code=0,
+        )
+        frame = decoded_frame(MessageType.MISSION_STATUS, status.encode())
+        decoded = MissionStatus.decode(frame.payload)
+        self.assertEqual(decoded, status)
+        with self.assertRaisesRegex(ValueError, "plan_id"):
+            dataclasses.replace(status, plan_id=0).encode()
+        with self.assertRaisesRegex(ValueError, "exit_code"):
+            dataclasses.replace(status, exit_code=40000).encode()
+
+    def test_golden_corridor_plan_schema_v2_frame(self):
+        raw = encode_frame(MessageType.CORRIDOR_PLAN, sample_plan().encode())
+        self.assertEqual(
+            raw.hex(),
+            "4c3201043b02070001000000e80300001879000065ff5afeaa2486f234032300"
+            "7c64000095615a004600230003000100ac710000160dd007f4016400f401ee02"
+            "4b5a",
+        )
+        decoded = CorridorPlanCompact.decode(FrameReader().feed(raw)[0].payload)
+        self.assertEqual(decoded.plan_schema_version, 2)
+        self.assertEqual(decoded.required_validity_ms, 29100)
+        self.assertEqual(decoded.post_tangent_reserve_ms, 3350)
+        self.assertEqual(decoded.local_command_watchdog_ms, 750)
+
+    def test_plan_timing_encoding_rejects_out_of_range_without_clamping(self):
+        out_of_range = {
+            "plan_schema_version": 0x100,
+            "required_validity_ms": 0x1_0000_0000,
+            "post_tangent_reserve_ms": 0x10000,
+            "terminal_completion_budget_ms": 0x10000,
+            "completion_hold_ms": 0x10000,
+            "plan_timing_guard_ms": 0x10000,
+            "command_ttl_ms": 0x10000,
+            "local_command_watchdog_ms": 0x10000,
+        }
+        for field, value in out_of_range.items():
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, field):
+                dataclasses.replace(sample_plan(), **{field: value}).encode()
+
+        with self.assertRaisesRegex(ValueError, "command_ttl_ms"):
+            dataclasses.replace(sample_plan(), command_ttl_ms=-1).encode()
+
+    def test_plan_timing_encoding_rejects_inconsistent_contract(self):
+        invalid = {
+            "plan_schema_version": 3,
+            "post_tangent_reserve_ms": 3349,
+            "required_validity_ms": 29000,
+            "valid_until_ms": 30000,
+        }
+        for field, value in invalid.items():
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                dataclasses.replace(sample_plan(), **{field: value}).encode()
 
     def test_golden_corridor_plan_schema_v2_frame(self):
         raw = encode_frame(MessageType.CORRIDOR_PLAN, sample_plan().encode())

@@ -3,10 +3,11 @@
 """Fail-closed, wheels-lifted-only Offboard setpoint smoke test for Orin2.
 
 Dry-run is the default and does not import ROS.  Manual-entry and motion modes
-never call arming or mode services.  The explicit auto zero-only mode may
-request OFFBOARD, one Arm, Disarm, and MANUAL only after the execution flag and
-exact physical-safety confirmation; it never writes parameters or publishes a
-nonzero setpoint.
+never request Arm or OFFBOARD entry, but all live modes perform a verified
+Disarm-then-MANUAL exit while maintaining zero setpoints.  The explicit auto
+zero-only mode may request OFFBOARD and one Arm only after the execution flag
+and exact physical-safety confirmation; it never writes parameters or
+publishes a nonzero setpoint.
 """
 
 from __future__ import annotations
@@ -23,8 +24,12 @@ from typing import Iterable, Sequence
 
 EXECUTE_PHRASE = "WHEELS_LIFTED_AND_RESTRAINED"
 GROUND_EXECUTE_PHRASE = "GROUND_AREA_CLEAR_RC_KILL_READY"
-MAX_LINEAR_MPS = 0.05
+DEFAULT_FORWARD_MPS = 0.05
+MAX_LINEAR_MPS = 0.20
 MAX_LATERAL_MPS = 0.05
+# Confirmed on Orin2 after restoring PWM_MAIN_REV=0 on 2026-08-05:
+# BODY_NED +x drives all four wheels physically forward.
+FORWARD_BODY_X_SIGN = 1.0
 MAX_MOTION_SEC = 5.0
 PUBLISH_RATE_HZ = 20.0
 # C2 MAVROS State is measured near 1 Hz; more than two missed periods fails
@@ -44,6 +49,7 @@ AUTO_RECOVERY_MAX_ATTEMPTS = 3
 AUTO_RECOVERY_TIMEOUT_SEC = 6.0
 AUTO_SERVICE_TIMEOUT_SEC = 2.0
 INITIAL_STATE_WAIT_TIMEOUT_SEC = 5.0
+MANUAL_AUTHORIZATION_TIMEOUT_SEC = 300.0
 
 
 @dataclass(frozen=True)
@@ -429,6 +435,8 @@ class AutoZeroOnlyStateMachine:
                 self._recovery_failed("state_stale_during_manual", now_sec)
             elif observation.armed:
                 self._enter(AutoPhase.REQUEST_DISARM, now_sec)
+            elif observation.mode.upper() == "MANUAL":
+                self._enter(AutoPhase.DONE, now_sec)
             elif self.manual_requests >= AUTO_RECOVERY_MAX_ATTEMPTS:
                 self._recovery_failed("manual_not_confirmed", now_sec)
             else:
@@ -460,7 +468,10 @@ class AutoZeroOnlyStateMachine:
 
 
 def build_plan(
-    *, forward_sec: float = 1.0, forward_only: bool = False
+    *,
+    forward_sec: float = 1.0,
+    forward_only: bool = False,
+    forward_speed_mps: float = DEFAULT_FORWARD_MPS,
 ) -> tuple[Step, ...]:
     """Return the immutable post-authorization motion sequence.
 
@@ -469,7 +480,12 @@ def build_plan(
     immediately instead of adding another zero dwell.
     """
     forward_steps = (
-        Step("forward", forward_sec, 0.05, 0.0),
+        Step(
+            "forward",
+            forward_sec,
+            FORWARD_BODY_X_SIGN * forward_speed_mps,
+            0.0,
+        ),
         Step("stop_after_forward", 3.0, 0.0, 0.0),
     )
     if forward_only:
@@ -569,6 +585,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--forward-sec", type=float, default=1.0)
     parser.add_argument(
+        "--forward-speed-mps",
+        type=float,
+        default=DEFAULT_FORWARD_MPS,
+        help=f"bounded BODY_NED forward speed (0-{MAX_LINEAR_MPS:.2f} m/s)",
+    )
+    parser.add_argument(
         "--zero-only-hold-sec",
         type=float,
         default=None,
@@ -598,7 +620,11 @@ def select_diagnostic(args: argparse.Namespace) -> Diagnostic:
         )
     if args.zero_only_hold_sec is not None:
         hold_sec = validate_zero_only_hold_sec(args.zero_only_hold_sec)
-        if args.forward_only or args.forward_sec != 1.0:
+        if (
+            args.forward_only
+            or args.forward_sec != 1.0
+            or args.forward_speed_mps != DEFAULT_FORWARD_MPS
+        ):
             raise ValueError(
                 "zero-only diagnostic cannot be combined with motion options"
             )
@@ -609,6 +635,7 @@ def select_diagnostic(args: argparse.Namespace) -> Diagnostic:
     plan = build_plan(
         forward_sec=args.forward_sec,
         forward_only=args.forward_only,
+        forward_speed_mps=args.forward_speed_mps,
     )
     validate_plan(plan)
     return MotionDiagnostic(plan=plan)
@@ -627,7 +654,10 @@ def require_live_confirmation(args: argparse.Namespace) -> None:
 
 def print_plan(plan: Iterable[Step]) -> None:
     print("Orin2 wheels-lifted Offboard smoke plan")
-    print("No automatic arm, disarm, mode change, or parameter write.")
+    print(
+        "No automatic Arm or OFFBOARD entry; exit is verified "
+        "Disarm -> MANUAL. No parameter write."
+    )
     for step in plan:
         print(
             f"  {step.name:20s} {step.duration_sec:4.1f}s "
@@ -725,15 +755,12 @@ def run_live(diagnostic: Diagnostic, namespace: str) -> int:
             self.frame_client = self.create_client(
                 GetParameters, f"{namespace}/setpoint_velocity/get_parameters"
             )
-            self.arming_client = None
-            self.set_mode_client = None
-            if isinstance(diagnostic, AutoZeroOnlyDiagnostic):
-                self.arming_client = self.create_client(
-                    CommandBool, f"{namespace}/cmd/arming"
-                )
-                self.set_mode_client = self.create_client(
-                    SetMode, f"{namespace}/set_mode"
-                )
+            self.arming_client = self.create_client(
+                CommandBool, f"{namespace}/cmd/arming"
+            )
+            self.set_mode_client = self.create_client(
+                SetMode, f"{namespace}/set_mode"
+            )
 
         def on_state(self, message: State) -> None:
             previous = self.last_state_fields
@@ -1100,6 +1127,8 @@ def run_live(diagnostic: Diagnostic, namespace: str) -> int:
 
     def drive_auto_machine(
         machine: AutoZeroOnlyStateMachine,
+        *,
+        success_event: str = "auto_zero_only_complete",
     ) -> tuple[int, str]:
         if not machine.started:
             wait_for_initial_state(machine)
@@ -1146,8 +1175,8 @@ def run_live(diagnostic: Diagnostic, namespace: str) -> int:
                 f"{node.state_diagnostics()}",
             )
             return 5, machine.primary_failure_reason
-        log_event("auto_zero_only_complete", node.state_diagnostics())
-        return 0, "auto_zero_only_complete"
+        log_event(success_event, node.state_diagnostics())
+        return 0, success_event
 
     def recover_auto_after_exception(
         machine: AutoZeroOnlyStateMachine,
@@ -1156,6 +1185,31 @@ def run_live(diagnostic: Diagnostic, namespace: str) -> int:
         machine.start_recovery(reason, time.monotonic())
         log_event("auto_recovery_started", f"reason={reason}")
         return drive_auto_machine(machine)
+
+    def ensure_verified_exit(
+        primary_exit_code: int,
+        primary_outcome: str,
+    ) -> tuple[int, str]:
+        nonlocal last_logged_phase
+        last_logged_phase = None
+        exit_machine = AutoZeroOnlyStateMachine(MIN_ZERO_ONLY_HOLD_SEC)
+        exit_machine.start_recovery(None, time.monotonic())
+        log_event(
+            "verified_exit_started",
+            f"primary_outcome={primary_outcome} {node.state_diagnostics()}",
+        )
+        recovery_code, recovery_outcome = drive_auto_machine(
+            exit_machine,
+            success_event="verified_exit_complete",
+        )
+        if recovery_code != 0:
+            log_event(
+                "verified_exit_unconfirmed",
+                f"primary_outcome={primary_outcome} "
+                f"recovery_outcome={recovery_outcome}",
+            )
+            return 8, f"{primary_outcome}_verified_exit_unconfirmed"
+        return primary_exit_code, primary_outcome
 
     try:
         if not body_ned_is_configured():
@@ -1185,7 +1239,7 @@ def run_live(diagnostic: Diagnostic, namespace: str) -> int:
             "connected+MANUAL+disarmed+manual_input, then wait for "
             "human-controlled Arm + OFFBOARD."
         )
-        ready_deadline = time.monotonic() + 60.0
+        ready_deadline = time.monotonic() + MANUAL_AUTHORIZATION_TIMEOUT_SEC
         while rclpy.ok() and time.monotonic() < ready_deadline:
             rclpy.spin_once(node, timeout_sec=0.0)
             node.publish(ZERO_SETPOINT)
@@ -1204,6 +1258,8 @@ def run_live(diagnostic: Diagnostic, namespace: str) -> int:
                 "diagnostic_failed",
                 f"reason={outcome} {node.state_diagnostics()}",
             )
+            if rclpy.ok():
+                exit_code, outcome = ensure_verified_exit(exit_code, outcome)
             return exit_code
 
         log_event("authorization_observed", node.state_diagnostics())
@@ -1232,6 +1288,7 @@ def run_live(diagnostic: Diagnostic, namespace: str) -> int:
                         "zero_only_hold_failed",
                         f"reason={failure_reason} {node.state_diagnostics()}",
                     )
+                    exit_code, outcome = ensure_verified_exit(exit_code, outcome)
                     return exit_code
                 node.publish(ZERO_SETPOINT)
                 time.sleep(period)
@@ -1246,6 +1303,7 @@ def run_live(diagnostic: Diagnostic, namespace: str) -> int:
                 "zero_only_hold_complete",
                 f"hold_sec={diagnostic.hold_sec:.3f} {node.state_diagnostics()}",
             )
+            exit_code, outcome = ensure_verified_exit(exit_code, outcome)
             return exit_code
 
         print(
@@ -1269,12 +1327,14 @@ def run_live(diagnostic: Diagnostic, namespace: str) -> int:
                         "motion_failed",
                         f"reason={failure_reason} {node.state_diagnostics()}",
                     )
+                    exit_code, outcome = ensure_verified_exit(exit_code, outcome)
                     return exit_code
                 node.publish(setpoint_for_step(step))
                 time.sleep(period)
         outcome = "motion_complete"
         exit_code = 0
         log_event("motion_complete", node.state_diagnostics())
+        exit_code, outcome = ensure_verified_exit(exit_code, outcome)
         return exit_code
     except KeyboardInterrupt:
         print("Interrupted: final zero burst will be sent.", file=sys.stderr)
@@ -1288,6 +1348,8 @@ def run_live(diagnostic: Diagnostic, namespace: str) -> int:
             if recovery_code == 8:
                 exit_code = recovery_code
                 outcome = recovery_outcome
+        elif rclpy.ok():
+            exit_code, outcome = ensure_verified_exit(exit_code, outcome)
         return exit_code
     except Exception as exc:
         outcome = "runtime_exception"
@@ -1300,6 +1362,8 @@ def run_live(diagnostic: Diagnostic, namespace: str) -> int:
             if recovery_code == 8:
                 exit_code = recovery_code
                 outcome = recovery_outcome
+        elif rclpy.ok():
+            exit_code, outcome = ensure_verified_exit(exit_code, outcome)
         return exit_code
     finally:
         if rclpy.ok():

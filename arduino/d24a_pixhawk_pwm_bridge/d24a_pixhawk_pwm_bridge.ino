@@ -27,10 +27,10 @@ struct MotorPins {
 const uint8_t THROTTLE_RC_PIN = 2;
 const uint8_t STEERING_RC_PIN = 13;
 
-const MotorPins MOTOR_A = {3, 4, 7};    // right-front, raw backward = physical forward
-const MotorPins MOTOR_B = {5, 8, 12};   // left-front, raw backward = physical forward
-const MotorPins MOTOR_C = {6, 10, 11};  // left-rear, raw forward = physical forward
-const MotorPins MOTOR_D = {9, A0, A1};  // right-rear, raw forward = physical forward
+const MotorPins MOTOR_A = {3, 4, 7};    // left-rear, raw forward = physical forward
+const MotorPins MOTOR_B = {5, 8, 12};   // right-front, raw forward = physical forward
+const MotorPins MOTOR_C = {6, 10, 11};  // right-rear, raw backward = physical forward
+const MotorPins MOTOR_D = {9, A0, A1};  // left-front, raw backward = physical forward
 const uint8_t STBY_PIN = A2;
 
 const int CENTER_US = 1500;
@@ -96,10 +96,10 @@ void drivePhysical(int leftCommand, int rightCommand) {
   leftCommand = applyMotorFloor(leftCommand);
   rightCommand = applyMotorFloor(rightCommand);
 
-  int rawA = -rightCommand;
-  int rawB = -leftCommand;
-  int rawC = leftCommand;
-  int rawD = rightCommand;
+  int rawA = leftCommand;
+  int rawB = rightCommand;
+  int rawC = -rightCommand;
+  int rawD = -leftCommand;
 
   digitalWrite(STBY_PIN, HIGH);
   setOneRawMotor(MOTOR_A, rawA);

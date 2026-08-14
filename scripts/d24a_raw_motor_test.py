@@ -119,7 +119,7 @@ def main() -> int:
     args = parse_args()
     port = args.port or "(auto-detect when armed)"
     pwm = max(0, min(255, args.pwm))
-    duration_ms = max(100, min(3000, int(args.duration * 1000)))
+    duration_ms = max(100, min(5000, int(args.duration * 1000)))
     command = RAW_COMMANDS[args.raw]
 
     print(f"Arduino port: {port}")

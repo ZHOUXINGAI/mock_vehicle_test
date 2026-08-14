@@ -46,6 +46,7 @@ class BodyLTurnOffboard(Node):
         declare_param("command_rate_hz", 20.0)
         declare_param("publish_unstamped_cmd_vel", True)
         declare_param("warmup_sec", 2.0)
+        declare_param("prestart_first_motion_setpoint", False)
         declare_param("initial_stop_sec", 0.5)
         declare_param("stop_after_first_sec", 0.4)
         declare_param("stop_after_turn_sec", 0.4)
@@ -58,6 +59,7 @@ class BodyLTurnOffboard(Node):
         declare_param("turn_lateral_speed_mps", 0.10)
         declare_param("turn_forward_speed_mps", 0.0)
         declare_param("yaw_tolerance_deg", 12.0)
+        declare_param("turn_completion_hold_sec", 0.0)
         declare_param("distance_tolerance_m", 0.12)
         declare_param("first_leg_max_sec", 35.0)
         declare_param("turn_max_sec", 12.0)
@@ -92,6 +94,9 @@ class BodyLTurnOffboard(Node):
             self.get_parameter("publish_unstamped_cmd_vel").value
         )
         self.warmup_sec = max(0.5, float(self.get_parameter("warmup_sec").value))
+        self.prestart_first_motion_setpoint = self._as_bool(
+            self.get_parameter("prestart_first_motion_setpoint").value
+        )
         self.initial_stop_sec = max(0.0, float(self.get_parameter("initial_stop_sec").value))
         self.stop_after_first_sec = max(0.0, float(self.get_parameter("stop_after_first_sec").value))
         self.stop_after_turn_sec = max(0.0, float(self.get_parameter("stop_after_turn_sec").value))
@@ -113,6 +118,9 @@ class BodyLTurnOffboard(Node):
         )
         self.yaw_tolerance_rad = math.radians(
             max(0.0, float(self.get_parameter("yaw_tolerance_deg").value))
+        )
+        self.turn_completion_hold_sec = max(
+            0.0, float(self.get_parameter("turn_completion_hold_sec").value)
         )
         self.distance_tolerance_m = max(
             0.0, float(self.get_parameter("distance_tolerance_m").value)
@@ -184,6 +192,9 @@ class BodyLTurnOffboard(Node):
         self.current_yaw: Optional[float] = None
         self.initial_yaw: Optional[float] = None
         self.turn_start_yaw: Optional[float] = None
+        self.previous_turn_yaw: Optional[float] = None
+        self.accumulated_turn_delta_rad = 0.0
+        self.turn_threshold_since_sec: Optional[float] = None
 
         self.stage = "waiting"
         self.stage_start_sec: Optional[float] = None
@@ -276,7 +287,10 @@ class BodyLTurnOffboard(Node):
         self._maybe_request_mode_and_arm(now)
 
         if self.stage == "waiting":
-            self._publish_body_velocity(0.0, 0.0)
+            if self.prestart_first_motion_setpoint:
+                self._publish_body_velocity(self.linear_speed_mps, 0.0)
+            else:
+                self._publish_body_velocity(0.0, 0.0)
             if self._abort_if_control_lost():
                 return
             if self._ready_to_start(now):
@@ -324,17 +338,28 @@ class BodyLTurnOffboard(Node):
             return
 
         if self.stage == "body_left_turn_arc":
-            self._publish_body_velocity(
-                self.turn_forward_speed_mps,
-                self.turn_direction_sign * self.turn_lateral_speed_mps,
-            )
-            yaw_delta = self._signed_turn_delta_rad()
+            yaw_delta = self._turn_progress_rad()
+            threshold = max(0.0, self.turn_angle_rad - self.yaw_tolerance_rad)
+            threshold_met = yaw_delta >= threshold
+            if threshold_met:
+                if self.turn_threshold_since_sec is None:
+                    self.turn_threshold_since_sec = now
+                threshold_hold = now - self.turn_threshold_since_sec
+                self._publish_body_velocity(0.0, 0.0)
+            else:
+                self.turn_threshold_since_sec = None
+                threshold_hold = 0.0
+                self._publish_body_velocity(
+                    self.turn_forward_speed_mps,
+                    self.turn_direction_sign * self.turn_lateral_speed_mps,
+                )
             self._log_progress(
                 now,
                 f"turn yaw_delta={math.degrees(yaw_delta):.1f}deg "
+                f"threshold_hold={threshold_hold:.2f}s "
                 f"elapsed={self._stage_elapsed(now):.1f}s",
             )
-            if yaw_delta >= max(0.0, self.turn_angle_rad - self.yaw_tolerance_rad):
+            if threshold_met and threshold_hold >= self.turn_completion_hold_sec:
                 self._enter_stage("stop_after_turn", now)
             elif self._stage_elapsed(now) >= self.turn_max_sec:
                 self.get_logger().warn("turn max time reached; continuing to second leg")
@@ -531,6 +556,10 @@ class BodyLTurnOffboard(Node):
         self.stage = stage
         self.stage_start_sec = now
         self.last_progress_log_sec = 0.0
+        if stage == "body_left_turn_arc":
+            self.turn_threshold_since_sec = None
+            self.previous_turn_yaw = self.current_yaw
+            self.accumulated_turn_delta_rad = 0.0
         self.get_logger().warn(f"stage -> {stage}")
 
     def _stage_elapsed(self, now: float) -> float:
@@ -554,6 +583,19 @@ class BodyLTurnOffboard(Node):
         return -self.turn_direction_sign * self._wrap_pi(
             self.current_yaw - self.turn_start_yaw
         )
+
+    def _turn_progress_rad(self) -> float:
+        if self.current_yaw is None:
+            return max(0.0, self.accumulated_turn_delta_rad)
+        if self.previous_turn_yaw is None:
+            self.previous_turn_yaw = self.current_yaw
+            return max(0.0, self.accumulated_turn_delta_rad)
+
+        yaw_step = self._wrap_pi(self.current_yaw - self.previous_turn_yaw)
+        self.previous_turn_yaw = self.current_yaw
+        self.accumulated_turn_delta_rad += -self.turn_direction_sign * yaw_step
+        self.accumulated_turn_delta_rad = max(0.0, self.accumulated_turn_delta_rad)
+        return self.accumulated_turn_delta_rad
 
     def _pose_is_fresh(self, now: float) -> bool:
         return self.pose is not None and now - self.pose_time_sec <= self.max_pose_age_sec
@@ -599,7 +641,8 @@ class BodyLTurnOffboard(Node):
         mode = self.state.mode if self.state else "UNKNOWN"
         pose_age = now - self.pose_time_sec if self.pose is not None else float("inf")
         self.get_logger().info(
-            f"holding stop; connected={self._is_connected()} mode={mode} "
+            f"holding {'first forward setpoint' if self.prestart_first_motion_setpoint else 'stop'}; "
+            f"connected={self._is_connected()} mode={mode} "
             f"armed={self._is_armed()} pose_fresh={self._pose_is_fresh(now)} "
             f"pose_age={pose_age:.2f}s"
         )

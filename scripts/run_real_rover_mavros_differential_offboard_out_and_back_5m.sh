@@ -56,6 +56,7 @@ CONFIRM_QGC_DISARM_READY="${CONFIRM_QGC_DISARM_READY:-false}"
 CONFIRM_PHYSICAL_POWER_CUTOFF_READY="${CONFIRM_PHYSICAL_POWER_CUTOFF_READY:-false}"
 CONFIRM_REAL_LOCAL_POSITION="${CONFIRM_REAL_LOCAL_POSITION:-false}"
 CONFIRM_ARDUINO_DIFFERENTIAL_PWM_BRIDGE="${CONFIRM_ARDUINO_DIFFERENTIAL_PWM_BRIDGE:-false}"
+CONFIRM_FRESH_USER_START="${CONFIRM_FRESH_USER_START:-false}"
 
 OUTPUT_MAPPING_ACTION="${OUTPUT_MAPPING_ACTION:-apply-differential-limited}"
 SETPOINT_VELOCITY_MAV_FRAME="${SETPOINT_VELOCITY_MAV_FRAME:-BODY_NED}"
@@ -81,7 +82,8 @@ for item in \
   CONFIRM_QGC_DISARM_READY \
   CONFIRM_PHYSICAL_POWER_CUTOFF_READY \
   CONFIRM_REAL_LOCAL_POSITION \
-  CONFIRM_ARDUINO_DIFFERENTIAL_PWM_BRIDGE
+  CONFIRM_ARDUINO_DIFFERENTIAL_PWM_BRIDGE \
+  CONFIRM_FRESH_USER_START
 do
   if [ "${!item}" != "true" ]; then
     missing+=("$item=true")
@@ -95,6 +97,10 @@ if [ "${#missing[@]}" -gt 0 ]; then
     for item in "${missing[@]}"; do
       echo "  $item"
     done
+    echo
+    echo "CONFIRM_FRESH_USER_START means the user gave a fresh start command for this exact run"
+    echo "after checking HDMI/display/USB/power cables, field clearance, RC kill, QGC disarm,"
+    echo "physical cutoff, PX4 safe state, and neutral outputs. Do not reuse an old confirmation."
   } >&2
   exit 2
 fi

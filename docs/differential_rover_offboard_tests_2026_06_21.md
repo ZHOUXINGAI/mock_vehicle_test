@@ -9,7 +9,21 @@ CA_AIRFRAME=6
 CA_R_REV=3
 ```
 
-Manual RC restore baseline remains:
+Lubancat 2026-06-22 current outdoor checkpoint:
+
+```text
+docs/lubancat_outdoor_offboard_checkpoint_2026_06_22.md
+```
+
+For the current Lubancat outdoor differential rover run, preserve:
+
+```text
+PWM_MAIN_FUNC1=101
+PWM_MAIN_FUNC2=102
+```
+
+The older manual RC passthrough restore baseline is only for returning to the
+old throttle/steering Arduino bridge:
 
 ```text
 PWM_MAIN_FUNC1=405
@@ -17,6 +31,17 @@ PWM_MAIN_FUNC2=403
 PWM_MAIN_FUNC6=0
 PWM_MAIN_FUNC7=0
 ```
+
+## Fresh Start Rule For Real Motors
+
+For any real motor-spinning or wheels-down test in this document,
+`CONFIRM_FRESH_USER_START=true` means the user has just given a fresh start
+command for that exact run. Do not reuse an earlier confirmation. `准备好了` or
+`ready` only authorizes script preparation and non-motion checks.
+
+Before setting `CONFIRM_FRESH_USER_START=true`, re-check HDMI/display/USB/power
+cables, field clearance, RC kill/disarm, QGC disarm, physical cutoff, PX4 safe
+state, and neutral outputs.
 
 ## Required Arduino Mode
 
@@ -64,14 +89,16 @@ CONFIRM_LOW_SPEED_WHEELS_TEST=true
 CONFIRM_ARDUINO_DIFFERENTIAL_PWM_BRIDGE=true
 ```
 
-The script temporarily applies:
+The script applies:
 
 ```text
 PWM_MAIN_FUNC1=101
 PWM_MAIN_FUNC2=102
 ```
 
-Cleanup restores the manual RC baseline.
+Warning: this older 5s script cleanup restores the manual RC passthrough
+baseline unless changed. For the current Lubancat outdoor baseline, re-verify
+`PWM_MAIN_FUNC1=101` and `PWM_MAIN_FUNC2=102` afterward.
 
 ## 3m Body-Frame L-Turn
 
@@ -120,7 +147,14 @@ CONFIRM_PHYSICAL_POWER_CUTOFF_READY=true
 CONFIRM_REAL_LOCAL_POSITION=true
 CONFIRM_CURRENT_DIFF_MAPPING=true
 CONFIRM_WHEELS_INSTALLED=true
+CONFIRM_FRESH_USER_START=true
 ```
+
+`CONFIRM_FRESH_USER_START=true` must only be set after the user gives a fresh
+start command for that exact run. Do not treat `准备好了` or an earlier
+confirmation as permission to move the vehicle. Re-check HDMI/display/USB/power
+cables, field clearance, RC kill, QGC disarm, physical cutoff, PX4 safe state,
+and neutral outputs before every run.
 
 ## 5m Out-And-Back
 
@@ -161,6 +195,7 @@ CONFIRM_QGC_DISARM_READY=true
 CONFIRM_PHYSICAL_POWER_CUTOFF_READY=true
 CONFIRM_REAL_LOCAL_POSITION=true
 CONFIRM_ARDUINO_DIFFERENTIAL_PWM_BRIDGE=true
+CONFIRM_FRESH_USER_START=true
 ```
 
 Defaults are conservative:

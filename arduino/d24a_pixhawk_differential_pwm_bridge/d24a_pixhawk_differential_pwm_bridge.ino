@@ -21,10 +21,10 @@ struct MotorPins {
 const uint8_t LEFT_RC_PIN = 2;
 const uint8_t RIGHT_RC_PIN = 13;
 
-const MotorPins MOTOR_A = {3, 4, 7};    // right-front, raw backward = physical forward
-const MotorPins MOTOR_B = {5, 8, 12};   // left-front, raw backward = physical forward
-const MotorPins MOTOR_C = {6, 10, 11};  // left-rear, raw forward = physical forward
-const MotorPins MOTOR_D = {9, A0, A1};  // right-rear, raw forward = physical forward
+const MotorPins MOTOR_A = {3, 4, 7};    // left-rear, raw forward = physical forward
+const MotorPins MOTOR_B = {5, 8, 12};   // right-front, raw forward = physical forward
+const MotorPins MOTOR_C = {6, 10, 11};  // right-rear, raw backward = physical forward
+const MotorPins MOTOR_D = {9, A0, A1};  // left-front, raw backward = physical forward
 const uint8_t STBY_PIN = A2;
 
 const int CENTER_US = 1500;
@@ -35,7 +35,12 @@ const int MAX_STICK_US = 450;
 const unsigned long PULSE_TIMEOUT_US = 25000;
 
 const int MIN_DRIVE_PWM = 70;
-const int MAX_DRIVE_PWM = 140;
+const int MAX_DRIVE_PWM = 255;
+
+// Keep a rolling curve continuous when one wheel command crosses the input
+// dead band. A near-zero common command still permits RC pivot turns.
+const int ROLLING_COMMON_COMMAND_MIN = 30;
+const int ROLLING_INNER_COMMAND_MIN = 1;
 
 const bool SWAP_LEFT_RIGHT_INPUTS = false;
 const bool INVERT_LEFT_COMMAND = false;
@@ -87,14 +92,31 @@ int applyMotorFloor(int command) {
   return command > 0 ? magnitude : -magnitude;
 }
 
+void preserveRollingDirection(int &leftCommand, int &rightCommand) {
+  int commonCommand = (leftCommand + rightCommand) / 2;
+
+  if (abs(commonCommand) < ROLLING_COMMON_COMMAND_MIN) {
+    return;
+  }
+
+  int rollingSign = commonCommand > 0 ? 1 : -1;
+  if (rollingSign * leftCommand <= 0) {
+    leftCommand = rollingSign * ROLLING_INNER_COMMAND_MIN;
+  }
+  if (rollingSign * rightCommand <= 0) {
+    rightCommand = rollingSign * ROLLING_INNER_COMMAND_MIN;
+  }
+}
+
 void drivePhysical(int leftCommand, int rightCommand) {
+  preserveRollingDirection(leftCommand, rightCommand);
   leftCommand = applyMotorFloor(leftCommand);
   rightCommand = applyMotorFloor(rightCommand);
 
-  int rawA = -rightCommand;
-  int rawB = -leftCommand;
-  int rawC = leftCommand;
-  int rawD = rightCommand;
+  int rawA = leftCommand;
+  int rawB = rightCommand;
+  int rawC = -rightCommand;
+  int rawD = -leftCommand;
 
   digitalWrite(STBY_PIN, HIGH);
   setOneRawMotor(MOTOR_A, rawA);

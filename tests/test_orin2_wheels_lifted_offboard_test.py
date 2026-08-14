@@ -121,9 +121,12 @@ class WheelsLiftedTest(unittest.TestCase):
     def test_dry_run_needs_no_confirmation(self) -> None:
         module.require_live_confirmation(module.parse_args([]))
 
+    def test_manual_authorization_wait_is_bounded_at_five_minutes(self) -> None:
+        self.assertEqual(module.MANUAL_AUTHORIZATION_TIMEOUT_SEC, 300.0)
+
     def test_invalid_motion_is_rejected(self) -> None:
         invalid_steps = (
-            module.Step("too_fast", 1.0, 0.051, 0.0),
+            module.Step("too_fast", 1.0, 0.201, 0.0),
             module.Step("too_much_yaw", 1.0, 0.0, 0.101),
             module.Step("too_long", 5.01, 0.01, 0.0),
             module.Step("nan", 1.0, float("nan"), 0.0),
@@ -133,12 +136,31 @@ class WheelsLiftedTest(unittest.TestCase):
                 module.validate_plan([step])
 
     def test_authorized_five_second_forward_only_plan(self) -> None:
-        plan = module.build_plan(forward_sec=5.0, forward_only=True)
+        plan = module.build_plan(
+            forward_sec=5.0,
+            forward_only=True,
+            forward_speed_mps=0.18,
+        )
         module.validate_plan(plan)
         self.assertEqual([step.name for step in plan], [
             "forward", "stop_after_forward"
         ])
         self.assertEqual(plan[0].duration_sec, 5.0)
+        self.assertEqual(plan[0].linear_x_mps, 0.18)
+
+    def test_forward_speed_cli_is_bounded(self) -> None:
+        diagnostic = module.select_diagnostic(
+            module.parse_args(
+                ["--forward-only", "--forward-speed-mps", "0.18"]
+            )
+        )
+        self.assertEqual(diagnostic.plan[0].linear_x_mps, 0.18)
+        with self.assertRaisesRegex(ValueError, "linear speed exceeds"):
+            module.select_diagnostic(
+                module.parse_args(
+                    ["--forward-only", "--forward-speed-mps", "0.201"]
+                )
+            )
 
     def test_motion_state_failure_reasons_are_distinct(self) -> None:
         healthy = {
@@ -219,11 +241,12 @@ class WheelsLiftedTest(unittest.TestCase):
         self.assertIn("no nonzero setpoint", rendered)
         self.assertIn("DRY RUN ONLY", rendered)
 
-    def test_forward_only_default_remains_one_second_at_point_zero_five(self) -> None:
+    def test_forward_only_uses_confirmed_orin2_body_x_sign(self) -> None:
         diagnostic = module.select_diagnostic(module.parse_args(["--forward-only"]))
         self.assertIsInstance(diagnostic, module.MotionDiagnostic)
         self.assertEqual(diagnostic.plan[0].name, "forward")
         self.assertEqual(diagnostic.plan[0].duration_sec, 1.0)
+        self.assertEqual(module.FORWARD_BODY_X_SIGN, 1.0)
         self.assertEqual(diagnostic.plan[0].linear_x_mps, 0.05)
 
     def test_auto_entry_flag_requires_zero_only_and_preserves_manual_entry(self) -> None:

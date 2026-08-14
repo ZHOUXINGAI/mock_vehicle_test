@@ -25,6 +25,7 @@ printf "deb [arch=%s signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http
 
 "${SUDO[@]}" apt-get update
 "${SUDO[@]}" apt-get install -y \
+  ros-humble-ros-base \
   ros-humble-mavros \
   ros-humble-mavros-extras
 

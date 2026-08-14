@@ -1,12 +1,98 @@
 # AGENT_STATE — mock_vehicle_test
 
-Last updated: 2026-06-21 CST
+Last updated: 2026-08-14 CST
+
+## Mandatory SITL/HITL Result Retention (2026-08-14)
+
+Boss requires every completed, aborted, or failed SITL/HITL run to leave a
+small, analysis-ready result directory under `results/<test>/<timestamp>/`.
+A test is not considered archived until its result directory and GIF exist.
+Keep SITL, read-only HITL, motion HITL, and outdoor-real results clearly
+labelled; simulated/fake state must never be mixed with real GPS/PX4 state.
+
+Minimum retained artifacts per run:
+
+- `summary.json`: scenario, start/end time, software commit plus dirty-state
+  note, SITL/HITL and real/simulated data-source labels, PASS/FAIL/ABORT,
+  termination reason, important controller/Pair B/health metrics, and links to
+  any external PX4 log;
+- `timeline.csv`: the compact synchronized planned-versus-actual trajectory,
+  phase, speed, gap/error, health, and relevant link statistics. Decimate raw
+  high-rate samples when that preserves the analysis; do not save redundant
+  copies of every topic;
+- `plan.json` (or an equivalent compact plan snapshot): geometry, timing,
+  speed envelope, frame/origin IDs, and command validity information;
+- `trajectory_xy_4x.gif`: mandatory 4x-speed XY replay showing planned and
+  actual motion, both vehicles when applicable, phase, and key errors. A
+  renderer failure must be reported and repaired rather than silently omitting
+  the GIF;
+- only the small diagnostic excerpt needed to explain a failure. Preserve full
+  MAVROS/PX4/Pair B logs or ULog only for failures, safety events, unexplained
+  behavior, or an explicitly selected reference baseline.
+
+Storage policy for the 128 GB computer:
+
+- do not routinely retain ROS bags, duplicate downloaded ULogs, RViz caches,
+  build trees, or full terminal logs when the compact artifacts above are
+  sufficient;
+- retain all safety-relevant and still-unexplained failures, plus explicitly
+  accepted reference baselines; for ordinary successful repetitions, keep the
+  compact mandatory artifacts and only the latest three representative raw-log
+  sets per scenario;
+- maintain a `latest` link for convenience, but never use it as the only copy;
+- when `results/` exceeds 20 GB or free disk space falls below 20 GB, produce a
+  size/age inventory for Boss review before deleting anything. Never
+  automatically delete the latest run, a failed/safety run, a unique field
+  result, or an accepted baseline.
+
+The 2026-08-14 Pair B dual-Pixhawk read-only HITL exposed a current tooling
+gap: `scripts/run_pairb_virtual_mini_hil_rviz.py` accepts `--artifact-dir` but
+does not yet write a per-run HITL record. It replayed
+`results/pairb_cooperative_docking_offline/20260811_174434/nominal/`, whose
+`summary.json`, `timeline.csv`, `plan.json`, and `trajectory_xy_4x.gif` remain
+the evidence for that replay. Before the next SITL/HITL run, make the runner
+create its own timestamped compact result and invoke the GIF renderer
+automatically at completion or abort.
+
+## Superseding 2026-08-11 Three-Stage Program
+
+Boss defined the authoritative development sequence:
+
+1. Finish the two-rover mock-docking stage. The remaining goal is not simple
+   path following: reproduce the EasyDocking-style cooperative encounter with
+   one stable Mini orbit, a short smooth orbit/tangent solution, a shared
+   terminal space-time corridor, Carrier-issued tasks for both vehicles, and
+   observable cooperative speed adaptation when either vehicle falls behind.
+2. Replace the two rovers with two quadrotors. A fast quadrotor emulates the
+   forward-moving fixed-wing Mini and a slower quadrotor represents Carrier.
+3. Replace the fast Mini-emulator quadrotor with the real fixed-wing Mini while
+   retaining the Carrier quadrotor.
+
+The detailed execution roadmap and stage exit gates are in
+`docs/three_stage_mock_to_aerial_docking_roadmap_2026_08_11.md`. Earlier
+straight-line chase tests are subsystem evidence, not completion of Stage 1.
+
+## Superseding 2026-08-07 Role Decision
+
+Boss reversed the mock-docking semantic roles without changing vehicle system
+IDs or Pair B wiring:
+
+- Orin2 on `/home/seeed`, `MAV_SYS_ID=2`: Carrier, docking leader and task
+  publisher.
+- Orin1, `MAV_SYS_ID=1`: Mini, fixed-wing child-aircraft mock and validated
+  command executor.
+- Ground remains monitoring/coordination, not the runtime planner.
+
+Older sections and documents describing Orin1 as Carrier and Orin2 as Mini are
+historical unless explicitly marked as still current.  Physical MAVLink IDs
+must not be changed merely to match semantic roles.
 
 ## Read First
 
-This file is the working-memory handoff for `/home/jetson/mock_vehicle_test`.
-Older notes may still mention `/home/hw/mock_vehicle_test`; the active Jetson
-workspace is `/home/jetson/mock_vehicle_test`.
+This file is the working-memory handoff for `/home/seeed/mock_vehicle_test`.
+Older notes may still mention `/home/hw/mock_vehicle_test`,
+`/home/jetson/mock_vehicle_test`, or `/home/cat/mock_vehicle_test`; the active
+Orin Nano workspace is `/home/seeed/mock_vehicle_test`.
 Every agent must read it before editing or running scripts in this repo.
 
 This repo is intentionally separate from `/home/hw/easydocking`.
@@ -43,9 +129,20 @@ short clarification before editing.
 
 ## Current Repo State
 
-- Path: `/home/jetson/mock_vehicle_test`
-- Git state at takeover: no commits yet on `master`.
-- Existing files are untracked because the repo is newly created.
+- Path: `/home/seeed/mock_vehicle_test`
+- Git branch: `master`, tracking `origin/master` at the migrated baseline commit
+  `77ec72dc0732f40d9b2610305508706308c715fd`. The working tree intentionally
+  contains uncommitted Lubancat hardware/offboard results; do not discard them.
+- 2026-07-21 Orin Nano runtime restoration is complete. QGroundControl v4.4.5
+  was rebuilt from source at
+  `tools/qgroundcontrol-v4.4.5/build/QGroundControl` using native ARM64 Qt
+  5.15.3 and matching QtLocation private headers. ROS 2 Humble MAVROS 2.14.0,
+  MAVROS extras, GeographicLib datasets, and Arduino CLI 1.5.0 are installed.
+  QGC and no-hardware MAVROS smoke tests passed. Pixhawk and Arduino were not
+  connected during restoration, so USB identity and the physical control chain
+  still require read-only verification after the hardware is connected.
+- Full restoration details and repeatable commands are in
+  `docs/orin_nano_runtime_restore_2026_07_21.md`.
 - Main entry points:
   - `start.sh`
   - `启动.sh`
@@ -60,6 +157,18 @@ short clarification before editing.
 
 - Manual RC control must remain independent of ROS/offboard.
 - First hardware tests must be wheels-up / vehicle lifted.
+- Any real-vehicle motion test requires fresh per-run user start confirmation
+  immediately before the script is launched. `准备好了`, `ready`, or an earlier
+  confirmation means only that setup/checks may continue; it does not authorize
+  motion. Wait for an explicit current-run start phrase such as `确认开始`.
+- Before setting motion-confirmation environment variables or launching a
+  motion script, verbally re-check: HDMI/display cable, USB/power/loose cables
+  clear or secured; wheels/ground path clear; RC kill/disarm ready; QGC disarm
+  ready; physical power cutoff ready; PX4 is `MANUAL`, `armed=false`,
+  `system_status=3`; and outputs are neutral.
+- Fresh start confirmation expires after every motion run, kill/termination,
+  collision, stuck wheel, cable change, reboot, MAVROS/PX4 disconnect, or
+  script refusal/failure. Do not reuse a previous confirmation for a second run.
 - Do not let rover scripts kill easydocking experiments unless the user
   explicitly asks.
 - Prefer scripts that refuse to start if PX4/MicroXRCEAgent is already running.
@@ -68,13 +177,91 @@ short clarification before editing.
 
 ## Current Hardware Baseline
 
+- 2026-07-21 new Orin Nano wheels-up motor-only check passed. Arduino UNO is
+  `/dev/ttyACM0`; Pixhawk 6C is `/dev/ttyACM1`. The `seeed` user was added to
+  `dialout`, and `ModemManager` was stopped and disabled. The connected PX4
+  currently broadcasts MAVLink system ID `2`; MAVROS connected when started
+  with `TARGET_SYSTEM=2`. Arduino was temporarily flashed with
+  `arduino/d24a_serial_bridge/d24a_serial_bridge.ino`, and the user confirmed
+  correct forward, left, and right responses at PWM 170 for 3 seconds each.
+  This validated only `Orin Nano -> Arduino -> D24A -> motors`, not RC or
+  Offboard. Arduino was then flashed back to
+  `arduino/d24a_pixhawk_differential_pwm_bridge/d24a_pixhawk_differential_pwm_bridge.ino`.
+  Final serial state was neutral (`in1_us/in2_us` about 1488-1495,
+  `left=0 right=0`), PX4 remained `armed=false`, and MAIN1/2 were 1500/1500.
+  Current MAVROS state also reported `AUTO.LOITER`, `manual_input=false`, and
+  `system_status=0`; resolve that state before any RC or Offboard motion test.
+  Full details are in `Hardware_Debug.md`.
+
+- 2026-06-22 Lubancat migration: user moved the Codex/session context to
+  Lubancat. The active working repo on this machine is
+  `/home/cat/mock_vehicle_test`, cloned from the Jetson success commit
+  `77ec72d Add real rover MAVROS offboard baseline`; the old Lubancat local
+  repo was preserved at
+  `/home/cat/mock_vehicle_test_lubancat_old_before_jetson_clone_20260622`.
+  Hardware is the same D24A/Pixhawk/Arduino rover chain as the Orin Nano
+  vehicle, only the companion computer changed. On 2026-06-22 the Pixhawk 6C
+  was flashed from Lubancat with
+  `firmware/px4-v1.17.0/px4_fmu-v6c_rover.px4` using
+  `tools/px4-v1.17.0/px_uploader.py`. Flash erase/program/verify completed and
+  the board rebooted as `usb-Auterion_PX4_FMU_v6C.x_0-if00` on `/dev/ttyACM1`.
+  Verified after flashing: `SYS_AUTOSTART=50000`, `CA_AIRFRAME=6`,
+  `MAV_TYPE=10`, `SYS_AUTOCONFIG=0`. Lubancat needed `python3-serial` and
+  user-local `pymavlink`; `ModemManager` was stopped during flashing because it
+  conflicts with Pixhawk serial bootloader access. After the user replugged
+  the Pixhawk, the vehicle heartbeat reported `armed=False`, and the Jetson
+  differential rover baseline was restored and verified over direct MAVLink:
+  `PWM_MAIN_FUNC1=101`, `PWM_MAIN_FUNC2=102`, `PWM_MAIN_FUNC6=0`,
+  `PWM_MAIN_FUNC7=0`, `PWM_MAIN_MIN/MAX1=1300/1700`,
+  `PWM_MAIN_MIN/MAX2=1300/1700`, `PWM_MAIN_DIS1/2/6/7=1500`,
+  `PWM_MAIN_FAIL1/2/6/7=1500`, `PWM_MAIN_REV=3`,
+  `RD_WHEEL_TRACK=0.30`, `RO_MAX_THR_SPEED=0.25`, `RO_SPEED_LIM=0.35`,
+  `RO_YAW_P=0.25`, `RO_YAW_RATE_LIM=90`, and zero speed/yaw-rate feedback
+  gains. Current Lubancat active RC intent mapping is
+  `RC_MAP_THROTTLE=2` and `RC_MAP_YAW=4`, so transmitter `CH2` is
+  forward/backward throttle intent and `CH4` is left/right steering intent.
+  Because the active output mapping is PX4 differential rover, `PWM_MAIN_FUNC1`
+  and `PWM_MAIN_FUNC2` are `101/102` motor outputs, not the old manual RC
+  passthrough `405/403`. If returning to the older pure passthrough Arduino
+  throttle/steering bridge, restore that documented manual baseline separately.
+  `scripts/px4_mavlink_param.py` also has a small local compatibility
+  patch for `pymavlink 2.4.49` instance-cache handling. The clean GitHub clone
+  does not contain the locally built QGC tree because it is ignored by git; on
+  Lubancat, `/home/cat/mock_vehicle_test/tools/qgroundcontrol-v4.4.5` is a
+  symlink to the preserved old local build under
+  `/home/cat/mock_vehicle_test_lubancat_old_before_jetson_clone_20260622/tools/qgroundcontrol-v4.4.5`.
+  `tools/run-qgroundcontrol.sh` sets `LD_LIBRARY_PATH` for that build's bundled
+  `libshp.so.1` and `libqmlglsink.so`.
+- 2026-06-22 Lubancat MAVROS/QGC bridge: QGC is configured for UDP-only and
+  does not open Pixhawk USB directly. The required bridge command is
+  `./scripts/run_mavros_px4_usb_to_qgc_logged.sh`, which uses Pixhawk USB
+  `/dev/serial/by-id/usb-Auterion_PX4_FMU_v6C.x_0-if00` and forwards MAVLink
+  to QGC at `udp://:14555@127.0.0.1:14550`. Lubancat initially had no ROS 2
+  CLI or MAVROS, so installed `ros-humble-ros-base`, `ros-humble-mavros`, and
+  `ros-humble-mavros-extras`, then ran
+  `/opt/ros/humble/lib/mavros/install_geographiclib_datasets.sh`. MAVROS then
+  connected successfully: `/mavros/state` showed `connected: true`,
+  `armed: false`, `manual_input: true`, `mode: MANUAL`.
+- 2026-06-22 QGC parameter-cache cleanup: after connecting to PX4 v1.17 rover,
+  QGC showed "Parameters are missing from firmware" for `1:RC5_DZ`. This came
+  from stale QGC parameter/cache metadata after switching firmware/builds, not
+  from a failed flash. QGC was stopped, and the old
+  `/home/cat/.config/QGroundControl.org/ParamCache`,
+  `ParameterFactMetaData.xml`, `ParameterFactMetaData.12.1.xml`, and current
+  QGC component-info cache files were moved to
+  `/home/cat/.config/QGroundControl.org/cache_backup_missing_RC5_DZ_20260622_180254`.
+  QGC was restarted from `/home/cat/mock_vehicle_test`; it regenerated
+  `ParamCache/1_1.v2`, MAVROS remained connected, and no new missing-parameter
+  log line appeared.
 - 2026-06-16: User confirmed both current hardware control paths are working:
   `Orin Nano -> Pixhawk 6C -> Arduino UNO -> D24A -> motors` and
   `AT9S PRO -> R9DS -> Pixhawk 6C -> Arduino UNO -> D24A -> motors`.
 - The current recoverable baseline is documented in
   `docs/current_rover_success_baseline_2026_06_16.md`.
-- Main Arduino firmware for the current Pixhawk bridge path is
-  `arduino/d24a_pixhawk_pwm_bridge/d24a_pixhawk_pwm_bridge.ino`.
+- Main Arduino firmware for the current Lubancat outdoor Pixhawk bridge path is
+  `arduino/d24a_pixhawk_differential_pwm_bridge/d24a_pixhawk_differential_pwm_bridge.ino`.
+  The older `arduino/d24a_pixhawk_pwm_bridge/d24a_pixhawk_pwm_bridge.ino`
+  remains only for the throttle/steering passthrough bridge.
 - Current transmitter/PX4 manual-control mapping for this vehicle is fixed:
   `CH2` controls forward/backward and `CH4` controls steering. Live testing on
   2026-06-21 showed the previous `PWM_MAIN_FUNC1=403`,
@@ -90,13 +277,315 @@ short clarification before editing.
 - D24A pinout and four-wheel direction mapping should be treated as frozen
   until a new wheels-up calibration is done. See
   `docs/d24a_current_motor_mapping.md`.
-- For PX4 differential-rover Offboard tests, do not use the normal
-  throttle/steering Arduino bridge. Use
+- 2026-06-22 Lubancat D24A remap completed with
+  `arduino/d24a_serial_bridge/d24a_serial_bridge.ino`, wheels lifted, PWM 90,
+  5 s per command. Final raw mapping is: `AF`=left-rear forward,
+  `AB`=left-rear backward, `BF`=right-front forward, `BB`=right-front backward,
+  `CF`=right-rear backward, `CB`=right-rear forward, `DF`=left-front backward,
+  `DB`=left-front forward. The high-level physical-forward raw command set is
+  `A:+`, `B:+`, `C:-`, `D:-`; left side is D/A, right side is B/C. During
+  diagnosis, `BF` initially failed even at PWM 255, but the root cause was the
+  Arduino `A2`--D24A `STBY` jumper falling off. After reconnecting `STBY`,
+  `BF` at PWM 90 drove the right-front wheel forward strongly, and `BB` at PWM
+  90 drove it backward normally. Do not treat the earlier `BF` failure as a B
+  half-bridge failure. After updating the Arduino D24A bridges and docs, the
+  Arduino was flashed back to
+  `arduino/d24a_pixhawk_differential_pwm_bridge/d24a_pixhawk_differential_pwm_bridge.ino`.
+  Serial output confirmed `D24A Pixhawk differential PWM bridge ready` with
+  Pixhawk inputs near neutral (`in1_us`/`in2_us` around 1490 us) and
+  `left=0 right=0`.
+- 2026-06-22 Lubancat outdoor Offboard checkpoint saved in
+  `docs/lubancat_outdoor_offboard_checkpoint_2026_06_22.md`. Next outdoor test
+  should start from the PX4 differential rover + Arduino differential bridge
+  state, preserving `PWM_MAIN_FUNC1=101` and `PWM_MAIN_FUNC2=102`; do not run
+  old cleanup paths that restore `405/403` unless intentionally returning to the
+  old passthrough bridge.
+- 2026-06-24 outdoor Lubancat Offboard mapping test: initial forward-only
+  attempt used
+  `scripts/run_real_rover_mavros_differential_offboard_forward_mapping.sh` with
+  `FORWARD_SEC=3`, `LINEAR_SPEED_MPS=0.10`, `LINEAR_DIRECTION_SIGN=-1.0`, and
+  `BODY_NED`. PX4 accepted OFFBOARD but rejected ARM because of
+  `Preflight Fail: Compass 0 uncalibrated`. User then calibrated compass and
+  accelerometer in QGC. Retest log:
+  `results/differential_offboard_forward_mapping/20260624_165927/offboard.log`.
+  PX4 accepted OFFBOARD, ARM succeeded, the forward-only sequence ran for 3 s,
+  then the script disarmed. Final enforced safety state after cleanup:
+  `/mavros/state` showed `connected=true`, `armed=false`, `manual_input=true`,
+  `mode=MANUAL`, and `/mavros/rc/out=[1500,1500,0,...]`. User observed the
+  wheels lifted: overall response looked backward first, then the two sides
+  diverged with one side forward and the other side backward. The local
+  Offboard log did not record live motor outputs, but it does prove the
+  "forward" step was actually `vx=-0.100` because the wrapper default was
+  `LINEAR_DIRECTION_SIGN=-1.0`. Treat this as the likely cause together with
+  PX4's yaw-alignment/yaw-correction behavior at Offboard entry. The wrapper
+  default was changed to `LINEAR_DIRECTION_SIGN=1.0`; it now supports
+  `TEST_SURFACE=wheels_lifted` and starts `src/mavros_rc_io_watch.py` so the
+  next retest records `/mavros/rc/out` in the same result directory. Next
+  lifted-wheel forward retest should use `LINEAR_SPEED_MPS=0.08`,
+  `FORWARD_SEC=2.0`, `LINEAR_DIRECTION_SIGN=1.0`, and confirm whether MAIN1
+  and MAIN2 move together for physical forward.
+- 2026-06-24 17:13 CST: Ran the lifted-wheel forward retest with
+  `FORWARD_SEC=3.0`, `LINEAR_SPEED_MPS=0.08`, `LINEAR_DIRECTION_SIGN=1.0`,
+  and run directory
+  `results/differential_offboard_forward_mapping/20260624_171345/`. PX4
+  accepted OFFBOARD and ARM, then disarmed successfully. User observed the
+  physical behavior was still wrong: about 1 s of turn-like motion, then 3 s
+  backward, then another turn-like motion. The new `rc_watch.log` explains it:
+  during Offboard/arm entry with stop setpoints PX4 output ramped
+  `MAIN1>1500` and `MAIN2<1500`, causing yaw correction; during the actual
+  `forward vx=+0.080` segment, both outputs were equal at about `1436/1436`.
+  The current Arduino bridge treats `<1500us` as negative left/right command,
+  which is physical backward for both sides. Therefore the Lubancat remapped
+  Arduino bridge and saved PX4 `PWM_MAIN_REV=3` were fighting each other.
+  Fixed this state for the next retest by stopping MAVROS, setting and saving
+  `PWM_MAIN_REV=0` over direct MAVLink, then restarting MAVROS. Verified after
+  restart: `/mavros/state connected=true armed=false manual_input=true
+  mode=MANUAL`, and `/mavros/rc/out=[1500,1500,0,...]`. Also updated
+  `src/real_rover_mavros_offboard_smoke.py` to support
+  `prestart_first_motion_setpoint`; the forward-mapping wrapper now defaults
+  this on, uses `INITIAL_STOP_SEC=0.0`, `STOP_SEC=0.2`,
+  `FINAL_STOP_SEC=0.0`, and `STOP_BURST_SEC=0.2` so the next forward test
+  enters Offboard while already publishing the forward setpoint instead of a
+  yaw-correcting stop setpoint. Next motion still requires fresh user safety
+  confirmation.
+- 2026-06-24 17:22 CST: Retested lifted-wheel Offboard forward after the
+  `PWM_MAIN_REV=0` and prestart-setpoint fixes. Run directory:
+  `results/differential_offboard_forward_mapping/20260624_172246/`. The
+  sequence was only `forward 3.00s vx=0.080` plus `stop_after_forward 0.20s`.
+  `rc_watch.log` showed the Offboard/arm entry and forward segment were both
+  clean straight positive output: `MAIN1=MAIN2` ramped up to and held
+  `1564/1564`; after stop/disarm it returned to `1500/1500`. User confirmed
+  the wheels physically moved forward for 3 s. Final safety state was verified:
+  `/mavros/state connected=true armed=false manual_input=true mode=MANUAL` and
+  `/mavros/rc/out=[1500,1500,0,...]`. Treat this as the current successful
+  Lubancat lifted-wheel forward Offboard baseline.
+- 2026-06-24 17:29 CST: Ran lifted-wheel open-loop Offboard right-turn sequence
+  after user confirmed wheels were lifted: forward 3 s, right-turn command 2 s,
+  second forward 3 s. Added `SECOND_FORWARD_SEC` support to
+  `src/real_rover_mavros_offboard_smoke.py` and
+  `scripts/run_real_rover_mavros_offboard_smoke.sh` so this sequence can be
+  represented by the generic smoke node. Run directory:
+  `results/differential_offboard_open_loop/open_loop_right_lifted_20260624_172945/`.
+  Commanded sequence was `forward vx=0.080`, `turn_right vx=0.000 vy=0.080
+  yaw_rate=0.200`, then `second_forward vx=0.080`. `rc_watch.log` showed:
+  forward segments held `MAIN1=MAIN2=1564`; right-turn segment moved into
+  differential output with `MAIN1>MAIN2`, peaking around `1611/1517`; outputs
+  returned to `1500/1500` after disarm. Final safety state verified:
+  `/mavros/state connected=true armed=false manual_input=true mode=MANUAL` and
+  `/mavros/rc/out=[1500,1500,0,...]`. Awaiting user's physical observation of
+  the lifted-wheel right-turn behavior.
+- 2026-06-24 17:32 CST: User requested next ground test but said not to start
+  until confirming: forward 3 s, right-turn U-turn, forward 3 s. Prepared
+  `scripts/run_real_rover_mavros_differential_offboard_open_loop_u_turn.sh`.
+  This is an open-loop timed ground test, not a closed-loop exact 180-degree
+  turn. Defaults are `FORWARD_SEC=3.0`, `TURN_RIGHT_SEC=5.0`,
+  `SECOND_FORWARD_SEC=3.0`, `LINEAR_SPEED_MPS=0.08`,
+  `TURN_LATERAL_SPEED_MPS=0.10`, `TURN_YAW_RATE_RADPS=0.25`, and it records
+  `/mavros/rc/out` to the same run directory under
+  `results/differential_offboard_open_loop/`. The script requires explicit
+  ground/wheels/RC/QGC/cutoff/local-position/mapping confirmations and was
+  tested to refuse startup without them. Do not run until the user says
+  confirmation/start. Current pre-run safety state after preparation:
+  `/mavros/state connected=true armed=false manual_input=true mode=MANUAL` and
+  `/mavros/rc/out=[1500,1500,0,...]`.
+- 2026-06-24 17:49 CST: User confirmed start for the ground open-loop U-turn
+  test. First precheck found `mode=MANUAL`, `armed=false`, `manual_input=true`,
+  and `/mavros/rc/out=[1500,1500,0,...]`, so ran
+  `scripts/run_real_rover_mavros_differential_offboard_open_loop_u_turn.sh`.
+  Run directory:
+  `results/differential_offboard_open_loop/open_loop_right_uturn_20260624_174945/`.
+  Commanded sequence: `forward 3s vx=0.080`, `turn_right 5s vx=0.000
+  vy=0.100 yaw_rate=0.250`, then `second_forward 3s vx=0.080`. PX4 entered
+  OFFBOARD, armed, ran the sequence, requested disarm, and cleanup returned to
+  `MANUAL`. `rc_watch.log` showed first forward held `MAIN1=MAIN2=1564`,
+  right-turn segment ramped into `MAIN1>MAIN2` and held around `1627/1533`
+  (peak about `1628/1532`), and the second forward returned to
+  `MAIN1=MAIN2=1564`. Final wrapper safety snapshot:
+  `/mavros/state connected=true armed=false manual_input=true mode=MANUAL` and
+  `/mavros/rc/out=[1500,1500,0,...]`. Awaiting user's physical observation of
+  whether the open-loop 5 s right-turn segment was close to a 180-degree U-turn
+  or needs `TURN_RIGHT_SEC` tuning.
+- 2026-06-24 after the open-loop U-turn: user reported the vehicle only turned
+  about 90 degrees. The matching ULog was downloaded as
+  `results/ulog_downloads/2026-06-24_09_49_56.ulg`; yaw analysis showed the
+  5-second right-turn segment changed measured yaw by about `79-81deg`, matching
+  the field observation. Therefore do not tune 180-degree turns by fixed
+  duration. Added
+  `scripts/run_real_rover_mavros_differential_offboard_closed_loop_right_u_turn.sh`
+  to run a sensor-feedback test: forward by `/mavros/local_position/pose`
+  distance, right turn until local yaw reaches `TURN_ANGLE_DEG`, then forward by
+  distance again. Defaults are `FIRST_DISTANCE_M=3.0`,
+  `SECOND_DISTANCE_M=3.0`, `LINEAR_SPEED_MPS=0.14`, `TURN_ANGLE_DEG=180`,
+  `TURN_DIRECTION_SIGN=+1.0`, `TURN_LATERAL_SPEED_MPS=0.35`,
+  `TURN_FORWARD_SPEED_MPS=0.0`, `YAW_TOLERANCE_DEG=3`, `TURN_MAX_SEC=45`, and
+  `MAX_LINEAR_SPEED_MPS=0.50`. The larger body-turn command is intentional for
+  the outdoor surface where stones/debris can stall the turn for 1-2 seconds.
+  The wrapper records `/mavros/rc/out`, listens for heading/magnetic
+  `STATUSTEXT` before starting, requires all ground/RC/QGC/cutoff/GPS/mapping
+  confirmations, and delegates control to the corrected body-frame L-turn
+  controller. User confirmed the outdoor field is large enough, so the wrapper
+  now defaults to `FIRST_DISTANCE_M=3.0` and `SECOND_DISTANCE_M=3.0` for better
+  local-position/GPS robustness. It has been syntax-checked only; do not run
+  until the user gives fresh safety confirmation.
+- 2026-06-24 18:06 CST: Ran the closed-loop right U-turn wrapper after user
+  confirmation. Run directory:
+  `results/differential_offboard_closed_loop_u_turn/closed_loop_right_uturn_20260624_180658/`.
+  Prechecks were clean: `MANUAL`, `armed=false`, `manual_input=true`,
+  `/mavros/rc/out=[1500,1500,...]`, fresh local pose, and no statustext warning
+  during the precheck listen. PX4 entered OFFBOARD, armed by external command,
+  and logged `/fs/microsd/log/2026-06-24/10_07_23.ulg`. First leg reached the
+  3m stop threshold after the last 1Hz log sample of `2.62m`. The yaw-closed
+  turn did progress in the correct direction, but with
+  `TURN_LATERAL_SPEED_MPS=0.16` and `TURN_MAX_SEC=22`, it only reached about
+  `117deg` before hitting the max-time guard, then continued to leg2. `rc_watch`
+  showed the turn output held around `MAIN1=1675`, `MAIN2=1581`, so the issue
+  was insufficient turn authority/time, not missing output. Leg2 reached the 3m
+  stop threshold after the last 1Hz log sample of `2.87m`. Script disarmed and
+  cleanup restored final safe state: `connected=true`, `armed=false`,
+  `manual_input=true`, `mode=MANUAL`, `/mavros/rc/out=[1500,1500,...]`.
+  After this run, updated the next-test defaults to
+  `TURN_LATERAL_SPEED_MPS=0.24`, `TURN_MAX_SEC=45`, `MAX_LINEAR_SPEED_MPS=0.35`,
+  and `RC_WATCH_DURATION_SEC=130`. Do not run again without fresh user
+  confirmation.
+- 2026-06-24 18:10 CST: Ran the stronger closed-loop right U-turn wrapper after
+  fresh user confirmation. Run directory:
+  `results/differential_offboard_closed_loop_u_turn/closed_loop_right_uturn_20260624_181035/`.
+  Settings were `FIRST_DISTANCE_M=3.0`, `SECOND_DISTANCE_M=3.0`,
+  `LINEAR_SPEED_MPS=0.14`, `TURN_DIRECTION_SIGN=+1.0`,
+  `TURN_LATERAL_SPEED_MPS=0.24`, `TURN_ANGLE_DEG=180`,
+  `YAW_TOLERANCE_DEG=8`, and `TURN_MAX_SEC=45`. PX4 logged
+  `/fs/microsd/log/2026-06-24/10_11_01.ulg`. First leg reached the 3m stop
+  threshold after the last 1Hz log sample of `2.86m`. The right turn exited by
+  yaw threshold, not timeout: yaw progress reached `172.7deg`, satisfying
+  `180deg - 8deg`, at about `33.0s`. `rc_watch.log` showed the turn command
+  saturated the high side around `MAIN1=1700` and held `MAIN2` near `1605-1607`,
+  which is expected with the stronger turn authority. Second leg reached the
+  3m stop threshold after the last 1Hz log sample of `2.77m`. The script
+  requested DISARM successfully and cleanup restored final safe state:
+  `connected=true`, `armed=false`, `manual_input=true`, `mode=MANUAL`,
+  `/mavros/rc/out=[1500,1500,...]`. This is the current successful outdoor
+  closed-loop U-turn baseline.
+- 2026-06-24 post-run cleanup: `src/mavros_rc_io_watch.py` now catches
+  `rclpy.executors.ExternalShutdownException` so stopping the background watch
+  during wrapper cleanup does not leave a misleading traceback in logs.
+- 2026-06-24 after the successful U-turn, user observed that the physical turn
+  still felt slow and not quite 180 degrees, and also noticed OFFBOARD-entry
+  heading alignment. Full-response update applied:
   `arduino/d24a_pixhawk_differential_pwm_bridge/d24a_pixhawk_differential_pwm_bridge.ino`
-  and temporary PX4 output mapping `PWM_MAIN_FUNC1=101`,
-  `PWM_MAIN_FUNC2=102`; cleanup must restore the manual RC baseline
-  `PWM_MAIN_FUNC1=405`, `PWM_MAIN_FUNC2=403`. Test entry points are documented
-  in `docs/differential_rover_offboard_tests_2026_06_21.md`.
+  changed `MAX_DRIVE_PWM` from `140` to `255`, compiled with
+  `arduino-builder`, and uploaded to the UNO with `avrdude`; serial verification
+  showed `D24A Pixhawk differential PWM bridge ready` and neutral input around
+  `1488-1495us` still maps to `left=0 right=0`. MAVROS was stopped to free
+  Pixhawk USB, then direct MAVLink params were set and saved:
+  `PWM_MAIN_MIN1=1000`, `PWM_MAIN_MAX1=2000`,
+  `PWM_MAIN_MIN2=1000`, `PWM_MAIN_MAX2=2000`; `PWM_MAIN_DIS1/2=1500`,
+  `PWM_MAIN_FAIL1/2=1500`, `PWM_MAIN_REV=0`, `CA_R_REV=3`,
+  `PWM_MAIN_FUNC1=101`, and `PWM_MAIN_FUNC2=102` remain correct.
+  `MAV_CMD_PREFLIGHT_STORAGE` returned result 0. MAVROS/QGC bridge was
+  restarted and verified safe: `connected=true`, `armed=false`,
+  `manual_input=true`, `mode=MANUAL`, `/mavros/rc/out=[1500,1500,...]`.
+  To reduce initial heading correction, `src/real_rover_mavros_offboard_l_turn.py`
+  now supports `prestart_first_motion_setpoint`; the closed-loop right U-turn
+  wrapper defaults it to true so OFFBOARD/ARM entry publishes the first forward
+  body-frame setpoint instead of stop. The next-test defaults are
+  `TURN_LATERAL_SPEED_MPS=0.35`, `YAW_TOLERANCE_DEG=3.0`, `TURN_MAX_SEC=45`,
+  and `MAX_LINEAR_SPEED_MPS=0.50`. This is a higher-energy ground configuration;
+  do not run again without fresh field-clear/RC/QGC/physical-cutoff confirmation.
+- 2026-06-24 18:21 CST: Ran the full-response closed-loop right U-turn after
+  fresh confirmation. Run directory:
+  `results/differential_offboard_closed_loop_u_turn/closed_loop_right_uturn_20260624_182109/`.
+  Settings were `FIRST_DISTANCE_M=3.0`, `SECOND_DISTANCE_M=3.0`,
+  `LINEAR_SPEED_MPS=0.14`, `TURN_LATERAL_SPEED_MPS=0.35`,
+  `YAW_TOLERANCE_DEG=3`, `TURN_MAX_SEC=45`, full Arduino `MAX_DRIVE_PWM=255`,
+  and PX4 `PWM_MAIN_MIN/MAX1/2=1000/2000`. Prestart first-motion setpoint
+  worked: the waiting logs said `holding first forward setpoint`, and `rc_watch`
+  showed equal forward outputs ramping to about `1780/1780` instead of an
+  initial differential heading-correction output. First leg reached the 3m stop
+  threshold after the last 1Hz log sample of `2.89m` in about 4.1s. During the
+  turn, `rc_watch` showed full authority was available (`MAIN1=2000`, MAIN2
+  mostly `1755-1825`), but the 1Hz local yaw progress was jumpy
+  (`54deg`, `128deg`, `104deg`, `63deg`, `138deg`) before the controller
+  stopped the turn. This means the full-response command is effective, but yaw
+  threshold completion can be fooled by a transient high yaw sample. Vehicle
+  finished the second leg, disarmed, and cleanup restored final safe state:
+  `connected=true`, `armed=false`, `manual_input=true`, `mode=MANUAL`,
+  `/mavros/rc/out=[1500,1500,...]`. After this run,
+  `src/real_rover_mavros_offboard_l_turn.py` was updated with
+  `turn_completion_hold_sec`; the full-response right-U-turn wrapper defaults
+  `TURN_COMPLETION_HOLD_SEC=0.3`, so the yaw threshold must hold briefly before
+  the script exits the turn. Do not run again without fresh confirmation.
+- 2026-06-24 18:25 CST: Ran the full-response right U-turn again with
+  `TURN_COMPLETION_HOLD_SEC=0.3`. Run directory:
+  `results/differential_offboard_closed_loop_u_turn/closed_loop_right_uturn_20260624_182513/`.
+  PX4 log path printed by the vehicle was
+  `/fs/microsd/log/2026-06-24/10_25_37.ulg`. The first 3m leg reached its
+  threshold, then the turn exposed a yaw wrap bug: direct yaw error crossed
+  `+166deg -> -141deg` at the +/-180deg boundary, so the controller stopped
+  treating the turn as near-complete and kept commanding rotation. The user
+  correctly hit the kill switch; QGC/PX4 reported `Kill engaged`,
+  `Flight termination active`, and `Disarmed by kill-switch`. After this run,
+  `src/real_rover_mavros_offboard_l_turn.py` was fixed to accumulate
+  incremental yaw progress across the wrap boundary and to publish a stop
+  command while the turn-completion hold timer is being satisfied. Do not run
+  motion after any kill event until `/mavros/state` returns `system_status=3`
+  and RC outputs are neutral.
+- 2026-06-24 18:29 CST: After verifying kill was reset and the precheck state
+  was `connected=true`, `armed=false`, `manual_input=true`, `mode=MANUAL`,
+  `system_status=3`, reran the closed-loop right U-turn with the yaw-wrap fix.
+  Run directory:
+  `results/differential_offboard_closed_loop_u_turn/closed_loop_right_uturn_20260624_182951/`.
+  PX4 log path printed by the vehicle was
+  `/fs/microsd/log/2026-06-24/10_30_19.ulg`. The test completed and cleanup
+  returned to `MANUAL`, `armed=false`, `system_status=3`, with
+  `/mavros/rc/out=[1500,1500,...]`. Stage summary: first leg reached the 3m
+  threshold after the last 1Hz sample of `2.73m`; turn stage eventually stopped
+  after a logged yaw progress of `175.6deg` and an unlogged threshold-hold
+  sample; second leg reached the 3m threshold after the last 1Hz sample of
+  `2.74m`. RC outputs confirmed full authority during the turn, including
+  `MAIN1=2000` with `MAIN2` around `1760-1804`, and later `MAIN2=2000`.
+  User later confirmed the vehicle hit/caught on small stones during the turn;
+  that explains the non-monotonic yaw samples
+  (`170deg -> 120deg -> 69deg -> 4deg -> ... -> 176deg`) as mechanical
+  disturbance rather than a remaining offboard mapping failure. Treat this
+  Lubancat differential-rover Offboard baseline as accepted for the current
+  vehicle: forward motion, high-authority differential turning, yaw-wrap
+  handling, cleanup, and safety recovery have all been validated outdoors.
+- 2026-06-24 safety correction after acceptance: the assistant reused the
+  user's earlier "ready" context and launched a second real offboard motion
+  test without waiting for a fresh `确认开始`; the rover still had an HDMI cable
+  connected to the screen. This is now recorded as a hard operating rule:
+  `准备好了` only authorizes preparation/checks, never motion. Every future
+  real-vehicle motion run must wait for a fresh current-run start confirmation
+  after the user has cleared HDMI/display/USB/power/loose cables and rechecked
+  RC kill, QGC disarm, physical cutoff, field clearance, PX4 safe state, and
+  neutral outputs.
+- 2026-07-04 CST: User decided to abandon the Lubancat companion-computer path
+  and move fully back to an Orin Nano. Created a private migration package at
+  `/home/cat/orin_nano_brain_migration_20260704_011107.tar.gz` plus
+  `/home/cat/orin_nano_brain_migration_20260704_011107.tar.gz.sha256`. It
+  contains the full `/home/cat/mock_vehicle_test` working tree, current Codex
+  state under `/home/cat/.codex` needed for session/history continuity, and QGC
+  settings from `/home/cat/.config/QGroundControl.org`. It includes
+  `.codex/auth.json` and must be treated as private credential-bearing data.
+  It intentionally excludes `~/.ssh`; configure a fresh GitHub SSH key on the
+  target Orin Nano. Restore details are in
+  `docs/orin_nano_brain_migration_2026_07_04.md` and in the archive's
+  `RESTORE_ORIN_NANO.md`.
+- 2026-07-21 CST: Restored the migration package onto the target Orin Nano as
+  user `seeed`. The active project path is `/home/seeed/mock_vehicle_test` and
+  the active QGroundControl settings are under
+  `/home/seeed/.config/QGroundControl.org`. Current Codex credentials and
+  configuration were retained; valid Lubancat sessions/history, attachments,
+  shell snapshots, and project memory were merged into `/home/seeed/.codex`.
+  Historical paths in older notes describe their source machines and should be
+  translated to `/home/seeed` when used on this Nano.
+- For the current PX4 differential-rover Offboard baseline, do not use the
+  normal throttle/steering Arduino bridge. Use
+  `arduino/d24a_pixhawk_differential_pwm_bridge/d24a_pixhawk_differential_pwm_bridge.ino`
+  and keep PX4 output mapping `PWM_MAIN_FUNC1=101`, `PWM_MAIN_FUNC2=102`.
+  Restore `405/403` only when intentionally returning to the old manual
+  passthrough bridge. Test entry points are documented in
+  `docs/differential_rover_offboard_tests_2026_06_21.md`.
 - 2026-06-20 Offboard diagnosis: fake-vision Offboard was accepted and the
   setpoint sequence ran, but the motors did not move because the working manual
   baseline had `PWM_MAIN_FUNC1=403` and `PWM_MAIN_FUNC2=405` (RC Pitch/Yaw

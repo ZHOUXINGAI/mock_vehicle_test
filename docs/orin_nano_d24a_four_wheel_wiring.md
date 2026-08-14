@@ -86,13 +86,13 @@ D24A GND  -> Arduino GND
 
 ## 5. 四个电机输出接线
 
-先按这个临时顺序接，后面用脚本标定真实方向：
+2026-06-22 架空 8 条测试后的当前实测轮位：
 
 ```text
-D24A Motor_A / AOUT1-AOUT2 -> 左前轮
+D24A Motor_A / AOUT1-AOUT2 -> 左后轮
 D24A Motor_B / BOUT1-BOUT2 -> 右前轮
-D24A Motor_C / COUT1-COUT2 -> 左后轮
-D24A Motor_D / DOUT1-DOUT2 -> 右后轮
+D24A Motor_C / COUT1-COUT2 -> 右后轮
+D24A Motor_D / DOUT1-DOUT2 -> 左前轮
 ```
 
 如果某个轮子方向反了，先不用急着换线，标定后可以在代码里改映射。
@@ -156,17 +156,17 @@ python3 scripts/d24a_raw_motor_test.py d_forward  --pwm 80 --duration 1 --armed
 python3 scripts/d24a_raw_motor_test.py d_backward --pwm 80 --duration 1 --armed
 ```
 
-每条命令只应该有一个轮子转。把结果记成下面这样：
+每条命令只应该有一个轮子转。当前实测结果：
 
 ```text
-A forward  = 哪个轮子，向前/向后
-A backward = 哪个轮子，向前/向后
-B forward  = 哪个轮子，向前/向后
-B backward = 哪个轮子，向前/向后
-C forward  = 哪个轮子，向前/向后
-C backward = 哪个轮子，向前/向后
-D forward  = 哪个轮子，向前/向后
-D backward = 哪个轮子，向前/向后
+A forward  = 左后轮前进
+A backward = 左后轮后退
+B forward  = 右前轮前进
+B backward = 右前轮后退
+C forward  = 右后轮后退
+C backward = 右后轮前进
+D forward  = 左前轮后退
+D backward = 左前轮前进
 ```
 
 拿到这 8 行后，再写高层动作：

@@ -1,5 +1,10 @@
 # Mock Docking Hardware Execution Design - 2026-07-22
 
+> Superseded role map, 2026-08-07: Orin2/system2 is now Carrier leader and
+> Orin1/system1 is Mini. Pair B wiring and system IDs did not change. See
+> `docs/orin2_carrier_two_rover_plan_2026_08_07.md`. The original role labels
+> below are retained only as historical design context.
+
 This is the rover hardware execution design for using two ground vehicles to
 mock the two-aircraft docking scheme.
 
@@ -216,7 +221,6 @@ Fail:
 - Any stop path fails.
 
 ## Current No-Motion Execution Boundary
-
 The repo now has a strict structural adapter from EasyDocking plans and
 commands to Pair B, plus guarded Mini and Carrier-local followers. The only
 executor backend in this stage is `no_motion`:

@@ -23,6 +23,8 @@ from lr24_compact_protocol import (
     PlanCommand,
     PlanFlag,
     Role,
+    StagedMissionFlag,
+    StagedMissionPlan,
     corridor_plan_timing_error,
     sequence_is_newer,
 )
@@ -72,8 +74,10 @@ class MiniCommandGate:
         self.active_plan: CorridorPlanCompact | None = None
         self.active_origin: FieldOrigin | None = None
         self.active_command: PlanCommand | None = None
+        self.active_staged_plan: StagedMissionPlan | None = None
         self.abort_latched: Abort | None = None
         self._last_plan_seq: int | None = None
+        self._last_staged_plan_seq: int | None = None
         self._last_origin_seq: int | None = None
         self._last_command_seq: int | None = None
         self._command_received_ms: int | None = None
@@ -110,6 +114,15 @@ class MiniCommandGate:
             self.active_plan = plan
             self._last_plan_seq = plan.seq
             return GateResult(Decision.ACCEPT, "corridor_plan", corridor_plan=plan)
+
+        if frame.msg_type == MessageType.STAGED_MISSION_PLAN:
+            plan = StagedMissionPlan.decode(frame.payload)
+            reason = self._validate_staged_plan(plan)
+            if reason:
+                return GateResult(Decision.REJECT, reason)
+            self.active_staged_plan = plan
+            self._last_staged_plan_seq = plan.seq
+            return GateResult(Decision.ACCEPT, "staged_mission_plan")
 
         if frame.msg_type == MessageType.PLAN_COMMAND:
             command = PlanCommand.decode(frame.payload)
@@ -192,6 +205,35 @@ class MiniCommandGate:
             return "invalid_carrier_speed"
         return None
 
+    def _validate_staged_plan(self, plan: StagedMissionPlan) -> str | None:
+        if self._last_staged_plan_seq is not None and not sequence_is_newer(
+            plan.seq, self._last_staged_plan_seq
+        ):
+            return "duplicate_or_old_staged_plan_seq"
+        if plan.schema_version != 1:
+            return "unsupported_staged_plan_schema"
+        if plan.plan_id <= 0:
+            return "invalid_staged_plan_id"
+        if not 0 < plan.validity_ms <= self.policy.max_plan_ttl_ms:
+            return "invalid_staged_plan_ttl"
+        if not plan.flags & int(StagedMissionFlag.S_BEND_RETURN):
+            return "unsupported_staged_mission"
+        if not 1000 <= plan.lead_delay_ms <= 30000:
+            return "invalid_lead_delay"
+        if not 0.5 <= plan.lead_distance_m <= 10.0:
+            return "invalid_lead_distance"
+        if not 1.0 <= plan.straight_distance_m <= 10.0:
+            return "invalid_straight_distance"
+        if not 1.0 <= plan.turn_radius_m <= 5.0:
+            return "invalid_turn_radius"
+        if abs(plan.lateral_offset_m) > 2.0 * plan.turn_radius_m + 0.05:
+            return "invalid_lateral_offset"
+        if not 0.01 <= plan.mini_speed_mps <= self.policy.max_linear_speed_mps:
+            return "invalid_mini_speed"
+        if not 0.01 <= plan.carrier_speed_mps <= self.policy.max_linear_speed_mps:
+            return "invalid_carrier_speed"
+        return None
+
     def _validate_origin(self, origin: FieldOrigin) -> str | None:
         if self._last_origin_seq is not None and not sequence_is_newer(
             origin.seq, self._last_origin_seq
@@ -237,4 +279,16 @@ class MiniCommandGate:
                 return "motion_without_corridor_plan"
             if command.plan_id != self.active_plan.plan_id:
                 return "plan_id_mismatch"
+        if command.phase == Phase.TRAJECTORY:
+            if self.active_staged_plan is None:
+                return "trajectory_without_staged_plan"
+            if command.plan_id != self.active_staged_plan.plan_id:
+                return "staged_plan_id_mismatch"
+            expected_speed = (
+                self.active_staged_plan.mini_speed_mps
+                if command.role == Role.MINI
+                else self.active_staged_plan.carrier_speed_mps
+            )
+            if abs(command.v_mps - expected_speed) > 0.011:
+                return "staged_speed_mismatch"
         return None

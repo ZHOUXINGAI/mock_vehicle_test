@@ -82,27 +82,28 @@ D24A GND  -> Arduino GND
 
 ## 当前电机方向基线
 
-原始 D24A 通道到实际轮子的方向：
+原始 D24A 通道到实际轮子的方向。2026-06-22 在 Lubancat 上重新架空
+8 条验证后，当前权威映射为：
 
 ```text
-A forward  = 右前轮后退
-A backward = 右前轮前进
+A forward  = 左后轮前进
+A backward = 左后轮后退
 
-B forward  = 左前轮后退
-B backward = 左前轮前进
+B forward  = 右前轮前进
+B backward = 右前轮后退
 
-C forward  = 左后轮前进
-C backward = 左后轮后退
+C forward  = 右后轮后退
+C backward = 右后轮前进
 
-D forward  = 右后轮前进
-D backward = 右后轮后退
+D forward  = 左前轮后退
+D backward = 左前轮前进
 ```
 
 因此当前高层动作映射固定为：
 
 ```text
-forward  = A:-pwm  B:-pwm  C:+pwm  D:+pwm
-backward = A:+pwm  B:+pwm  C:-pwm  D:-pwm
+forward  = A:+pwm  B:+pwm  C:-pwm  D:-pwm
+backward = A:-pwm  B:-pwm  C:+pwm  D:+pwm
 left     = A:-pwm  B:+pwm  C:-pwm  D:+pwm
 right    = A:+pwm  B:-pwm  C:+pwm  D:-pwm
 ```

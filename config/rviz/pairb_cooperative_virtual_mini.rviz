@@ -1,0 +1,191 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Alpha: 0.45
+      Cell Size: 1
+      Class: rviz_default_plugins/Grid
+      Color: 120; 120; 120
+      Enabled: true
+      Name: Ground Grid
+      Plane: XY
+      Reference Frame: <Fixed Frame>
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz_default_plugins/Path
+      Color: 0; 190; 255
+      Enabled: true
+      Line Style: Lines
+      Line Width: 0.07
+      Name: Carrier Cooperative Plan
+      Pose Style: None
+      Topic:
+        Depth: 5
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /pairb/shadow_carrier/planned_path
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz_default_plugins/Path
+      Color: 255; 210; 0
+      Enabled: true
+      Line Style: Lines
+      Line Width: 0.09
+      Name: Carrier Shadow Execution
+      Pose Style: None
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /pairb/shadow_carrier/actual_path
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz_default_plugins/Path
+      Color: 230; 70; 255
+      Enabled: true
+      Line Style: Lines
+      Line Width: 0.07
+      Name: Virtual Mini Plan
+      Pose Style: None
+      Topic:
+        Depth: 5
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /pairb/mini/planned_path
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz_default_plugins/Path
+      Color: 40; 230; 100
+      Enabled: true
+      Line Style: Lines
+      Line Width: 0.09
+      Name: Virtual Mini Execution
+      Pose Style: None
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /pairb/mini/actual_path
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz_default_plugins/Path
+      Color: 255; 80; 70
+      Enabled: true
+      Line Style: Lines
+      Line Width: 0.11
+      Name: Real Carrier Sensor Trace
+      Pose Style: None
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /pairb/real_carrier/actual_path
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz_default_plugins/Path
+      Color: 255; 145; 40
+      Enabled: true
+      Line Style: Lines
+      Line Width: 0.11
+      Name: Real Mini Sensor Trace (frame-aligned)
+      Pose Style: None
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /pairb/real_mini/actual_path
+    - Alpha: 1
+      Axes Length: 0.45
+      Axes Radius: 0.05
+      Class: rviz_default_plugins/Pose
+      Enabled: true
+      Name: Carrier Shadow Pose
+      Shape: Arrow
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /pairb/shadow_carrier/vehicle_pose
+    - Alpha: 1
+      Axes Length: 0.45
+      Axes Radius: 0.05
+      Class: rviz_default_plugins/Pose
+      Enabled: true
+      Name: Virtual Mini Pose
+      Shape: Arrow
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /pairb/mini/vehicle_pose
+    - Alpha: 1
+      Axes Length: 0.55
+      Axes Radius: 0.06
+      Class: rviz_default_plugins/Pose
+      Enabled: true
+      Name: Real Carrier Pose
+      Shape: Arrow
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /pairb/real_carrier/vehicle_pose
+    - Alpha: 1
+      Axes Length: 0.55
+      Axes Radius: 0.06
+      Class: rviz_default_plugins/Pose
+      Enabled: true
+      Name: Real Mini Pose (frame-aligned)
+      Shape: Arrow
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /pairb/real_mini/vehicle_pose
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Cooperation Status
+      Namespaces:
+        pairb_cooperation: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /pairb/cooperation_status
+  Enabled: true
+  Global Options:
+    Background Color: 28; 30; 34
+    Fixed Frame: map
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+  Views:
+    Current:
+      Angle: 0
+      Class: rviz_default_plugins/TopDownOrtho
+      Name: Top Down
+      Scale: 18
+      Target Frame: <Fixed Frame>
+Window Geometry:
+  Height: 900
+  Width: 1400

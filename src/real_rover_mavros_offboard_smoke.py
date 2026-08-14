@@ -53,6 +53,7 @@ class RealRoverMavrosOffboardSmoke(Node):
         declare_param("mavros_namespace", "/mavros")
         declare_param("command_rate_hz", 20.0)
         declare_param("publish_unstamped_cmd_vel", True)
+        declare_param("prestart_first_motion_setpoint", False)
         declare_param("warmup_sec", 2.0)
         declare_param("initial_stop_sec", -1.0)
         declare_param("stop_sec", 1.0)
@@ -61,6 +62,7 @@ class RealRoverMavrosOffboardSmoke(Node):
         declare_param("turn_sec", 0.5)
         declare_param("turn_left_sec", -1.0)
         declare_param("turn_right_sec", -1.0)
+        declare_param("second_forward_sec", 0.0)
         declare_param("final_stop_sec", 2.0)
         declare_param("linear_speed_mps", 0.12)
         declare_param("linear_direction_sign", -1.0)
@@ -100,6 +102,9 @@ class RealRoverMavrosOffboardSmoke(Node):
         self.publish_unstamped_cmd_vel = self._as_bool(
             self.get_parameter("publish_unstamped_cmd_vel").value
         )
+        self.prestart_first_motion_setpoint = self._as_bool(
+            self.get_parameter("prestart_first_motion_setpoint").value
+        )
         self.warmup_sec = max(0.5, float(self.get_parameter("warmup_sec").value))
         initial_stop_sec = float(self.get_parameter("initial_stop_sec").value)
         self.stop_sec = max(0.2, float(self.get_parameter("stop_sec").value))
@@ -115,7 +120,10 @@ class RealRoverMavrosOffboardSmoke(Node):
         self.turn_right_sec = (
             self.turn_sec if turn_right_sec < 0.0 else max(0.0, turn_right_sec)
         )
-        self.final_stop_sec = max(0.5, float(self.get_parameter("final_stop_sec").value))
+        self.second_forward_sec = max(
+            0.0, float(self.get_parameter("second_forward_sec").value)
+        )
+        self.final_stop_sec = max(0.0, float(self.get_parameter("final_stop_sec").value))
         self.linear_speed_mps = abs(float(self.get_parameter("linear_speed_mps").value))
         self.linear_direction_sign = (
             1.0
@@ -257,6 +265,7 @@ class RealRoverMavrosOffboardSmoke(Node):
             f"require_armed={self.require_armed} "
             f"mode_request_retry_sec={self.mode_request_retry_sec:.1f} "
             f"publish_unstamped_cmd_vel={self.publish_unstamped_cmd_vel} "
+            f"prestart_first_motion_setpoint={self.prestart_first_motion_setpoint} "
             f"linear_direction_sign={self.linear_direction_sign:.0f} "
             f"turn_vector=({self.turn_linear_speed_mps * self.turn_linear_direction_sign:.3f}, "
             f"{self.turn_lateral_speed_mps:.3f})"
@@ -312,7 +321,15 @@ class RealRoverMavrosOffboardSmoke(Node):
         if self.turn_right_sec > 0.0:
             sequence.append(SmokeStep("turn_right", self.turn_right_sec, turn_x, -turn_y, -turn))
             sequence.append(SmokeStep("stop_after_right", self.stop_sec, 0.0, 0.0, 0.0))
-        sequence.append(SmokeStep("final_stop", self.final_stop_sec, 0.0, 0.0, 0.0))
+        if self.second_forward_sec > 0.0:
+            sequence.append(
+                SmokeStep("second_forward", self.second_forward_sec, forward_x, 0.0, 0.0)
+            )
+            sequence.append(
+                SmokeStep("stop_after_second_forward", self.stop_sec, 0.0, 0.0, 0.0)
+            )
+        if self.final_stop_sec > 0.0:
+            sequence.append(SmokeStep("final_stop", self.final_stop_sec, 0.0, 0.0, 0.0))
         return sequence
 
     def _timer_cb(self) -> None:
@@ -323,7 +340,12 @@ class RealRoverMavrosOffboardSmoke(Node):
         self._maybe_request_mode_and_arm(now)
 
         if self.step_start_sec is None:
-            self._publish_velocity(0.0, 0.0, 0.0)
+            prestart = self._prestart_velocity()
+            self._publish_velocity(
+                prestart.linear_x_mps,
+                prestart.linear_y_mps,
+                prestart.yaw_rate_radps,
+            )
             if self._abort_if_control_lost():
                 return
             if self._ready_to_start(now):
@@ -393,6 +415,18 @@ class RealRoverMavrosOffboardSmoke(Node):
                 if self._request_arm(True):
                     self.arm_request_sent = True
                     self.last_arm_request_sec = now
+
+    def _prestart_velocity(self) -> SmokeStep:
+        if not self.prestart_first_motion_setpoint:
+            return SmokeStep("prestart_stop", 0.0, 0.0, 0.0, 0.0)
+        for step in self.sequence:
+            if (
+                abs(step.linear_x_mps) > 1.0e-6
+                or abs(step.linear_y_mps) > 1.0e-6
+                or abs(step.yaw_rate_radps) > 1.0e-6
+            ):
+                return step
+        return SmokeStep("prestart_stop", 0.0, 0.0, 0.0, 0.0)
 
     def _request_offboard(self) -> bool:
         if not self.set_mode_client.service_is_ready():
@@ -551,8 +585,12 @@ class RealRoverMavrosOffboardSmoke(Node):
         mode = self.state.mode if self.state else "UNKNOWN"
         stamped_subs = self.cmd_vel_pub.get_subscription_count()
         unstamped_subs = self.cmd_vel_unstamped_pub.get_subscription_count()
+        prestart = self._prestart_velocity()
         self.get_logger().info(
-            f"holding stop; connected={self._is_connected()} "
+            f"holding prestart setpoint vx={prestart.linear_x_mps:.3f} "
+            f"vy={prestart.linear_y_mps:.3f} "
+            f"yaw_rate={prestart.yaw_rate_radps:.3f}; "
+            f"connected={self._is_connected()} "
             f"mode={mode} armed={self._is_armed()} "
             f"setpoint_subs=stamped:{stamped_subs} unstamped:{unstamped_subs}"
         )
